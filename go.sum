@@ -163,6 +163,8 @@ github.com/hatchet-dev/hatchet v0.83.15 h1:L91vuCj+EEjvZw8YJOLZYYD6O5MSiHhkpU0lk
 github.com/hatchet-dev/hatchet v0.83.15/go.mod h1:CpGBR8+VlWXItUfr3ShFj9RdwbxgWsQ/+fK1PuXEHBw=
 github.com/hatchet-dev/hatchet v0.83.48 h1:eQMwEvbr5u7XVhB5mjP0/4GQa59wPjWg8xio9/lLFqk=
 github.com/hatchet-dev/hatchet v0.83.48/go.mod h1:0s89TOL9gCtbwvrO0K8oW+WuiRy684b7qOLm9sl88Dc=
+github.com/hatchet-dev/hatchet v0.83.55 h1:H5suE2Qbt24hpbxYHOEV1m7XuHKLO7hhbnnYK6/6YJc=
+github.com/hatchet-dev/hatchet v0.83.55/go.mod h1:AiJByqvfhMAgIHw1iQrBTksNL6If5GjvGjikru99UB4=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
@@ -284,6 +286,8 @@ github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0t
 github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
 github.com/rs/zerolog v1.35.0 h1:VD0ykx7HMiMJytqINBsKcbLS+BJ4WYjz+05us+LRTdI=
 github.com/rs/zerolog v1.35.0/go.mod h1:EjML9kdfa/RMA7h/6z6pYmq1ykOuA8/mjWaEvGI+jcw=
+github.com/rs/zerolog v1.35.1 h1:m7xQeoiLIiV0BCEY4Hs+j2NG4Gp2o2KPKmhnnLiazKI=
+github.com/rs/zerolog v1.35.1/go.mod h1:EjML9kdfa/RMA7h/6z6pYmq1ykOuA8/mjWaEvGI+jcw=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/sagikazarmark/locafero v0.11.0 h1:1iurJgmM9G3PA/I+wWYIOw/5SyBtxapeHDcg+AAIFXc=
 github.com/sagikazarmark/locafero v0.11.0/go.mod h1:nVIGvgyzw595SUSUE6tvCp3YYTeHs15MvlmU87WwIik=
