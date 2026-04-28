@@ -1,7 +1,5 @@
 version: '3'
 
-default: build
-
 vars:
   LANGUAGE:
     sh: |
@@ -14,8 +12,16 @@ vars:
       else
         echo unknown
       fi
+  GO_MODULES:
+    sh: |
+      find . -name go.mod -not -path "*/vendor/*" -not -path "*/.git/*" -exec dirname {} \; | sort
 
 tasks:
+  default:
+    desc: "Build the detected project"
+    cmds:
+      - task: build
+
   build:
     desc: "Build the detected project"
     cmds:
@@ -23,12 +29,11 @@ tasks:
         set -e
         case "{{.LANGUAGE}}" in
           go)
-            find . -name go.mod -not -path "*/vendor/*" -not -path "*/.git/*" -exec dirname {} \; \
-              | sort \
-              | while IFS= read -r module; do
-                  echo "==> go build ${module}"
-                  (cd "${module}" && go build -v ./...)
-                done
+            printf '%s\n' "{{.GO_MODULES}}" | while IFS= read -r module; do
+              [ -n "${module}" ] || continue
+              echo "==> go build ${module}"
+              (cd "${module}" && go build -v ./...)
+            done
             ;;
           python)
             python -m build
@@ -49,12 +54,11 @@ tasks:
         set -e
         case "{{.LANGUAGE}}" in
           go)
-            find . -name go.mod -not -path "*/vendor/*" -not -path "*/.git/*" -exec dirname {} \; \
-              | sort \
-              | while IFS= read -r module; do
-                  echo "==> go test ${module}"
-                  (cd "${module}" && go test -v ./...)
-                done
+            printf '%s\n' "{{.GO_MODULES}}" | while IFS= read -r module; do
+              [ -n "${module}" ] || continue
+              echo "==> go test ${module}"
+              (cd "${module}" && go test -v ./...)
+            done
             ;;
           python)
             pytest
@@ -75,16 +79,15 @@ tasks:
         set -e
         case "{{.LANGUAGE}}" in
           go)
-            find . -name go.mod -not -path "*/vendor/*" -not -path "*/.git/*" -exec dirname {} \; \
-              | sort \
-              | while IFS= read -r module; do
-                  echo "==> go lint ${module}"
-                  if command -v golangci-lint >/dev/null 2>&1; then
-                    (cd "${module}" && golangci-lint run --timeout 10m ./...)
-                  else
-                    (cd "${module}" && go vet ./...)
-                  fi
-                done
+            printf '%s\n' "{{.GO_MODULES}}" | while IFS= read -r module; do
+              [ -n "${module}" ] || continue
+              echo "==> go lint ${module}"
+              if command -v golangci-lint >/dev/null 2>&1; then
+                (cd "${module}" && golangci-lint run --timeout 10m ./...)
+              else
+                (cd "${module}" && go vet ./...)
+              fi
+            done
             ;;
           python)
             ruff check .
@@ -105,12 +108,11 @@ tasks:
         set -e
         case "{{.LANGUAGE}}" in
           go)
-            find . -name go.mod -not -path "*/vendor/*" -not -path "*/.git/*" -exec dirname {} \; \
-              | sort \
-              | while IFS= read -r module; do
-                  echo "==> go clean ${module}"
-                  (cd "${module}" && go clean -cache -testcache)
-                done
+            printf '%s\n' "{{.GO_MODULES}}" | while IFS= read -r module; do
+              [ -n "${module}" ] || continue
+              echo "==> go clean ${module}"
+              (cd "${module}" && go clean -testcache)
+            done
             rm -rf bin/ coverage.out coverage.html
             ;;
           python)
