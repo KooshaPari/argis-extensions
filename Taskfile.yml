@@ -1,20 +1,26 @@
 version: '3'
 
 vars:
-  LANGUAGE:
+  LANGUAGES:
     sh: |
-      if [ -f go.work ] || [ -f go.mod ]; then
-        echo go
-      elif [ -f pyproject.toml ]; then
-        echo python
-      elif [ -f package.json ]; then
-        echo node
+      languages=""
+      [ -n "$(find . -name go.mod -not -path './.git/*' -print -quit)" ] && languages="${languages} go"
+      [ -n "$(find . -name pyproject.toml -not -path './.git/*' -print -quit)" ] && languages="${languages} python"
+      [ -n "$(find . -name package.json -not -path './.git/*' -not -path './node_modules/*' -print -quit)" ] && languages="${languages} node"
+      if [ -n "${languages}" ]; then
+        echo "${languages# }"
       else
         echo unknown
       fi
   GO_MODULE_DIRS:
     sh: |
       find . -name go.mod -not -path './.git/*' -exec dirname {} \; | sort | tr '\n' ' '
+  PYTHON_PROJECT_DIRS:
+    sh: |
+      find . -name pyproject.toml -not -path './.git/*' -exec dirname {} \; | sort | tr '\n' ' '
+  NODE_PROJECT_DIRS:
+    sh: |
+      find . -name package.json -not -path './.git/*' -not -path './node_modules/*' -exec dirname {} \; | sort | tr '\n' ' '
 
 tasks:
   default:
@@ -22,104 +28,152 @@ tasks:
     cmds:
       - task: build
 
+  detect:
+    desc: Print detected project languages
+    cmds:
+      - echo "{{.LANGUAGES}}"
+
   build:
-    desc: Build the detected project language
+    desc: Build all detected project languages
     cmds:
       - |
         set -e
-        case "{{.LANGUAGE}}" in
-          go)
-            for module in {{.GO_MODULE_DIRS}}; do
-              echo "Building ${module}"
-              (cd "${module}" && go build ./...)
-            done
-            ;;
-          python)
-            python -m build
-            ;;
-          node)
-            npm run build
-            ;;
-          *)
-            echo "Unable to detect a supported project language"
-            exit 1
-            ;;
-        esac
+        ran=0
+        if [ -n "{{.GO_MODULE_DIRS}}" ]; then
+          ran=1
+          for module in {{.GO_MODULE_DIRS}}; do
+            echo "Building Go module ${module}"
+            (cd "${module}" && go build ./...)
+          done
+        fi
+        if [ -n "{{.PYTHON_PROJECT_DIRS}}" ]; then
+          ran=1
+          for project in {{.PYTHON_PROJECT_DIRS}}; do
+            echo "Building Python project ${project}"
+            if command -v uv >/dev/null 2>&1; then
+              (cd "${project}" && uv build)
+            else
+              (cd "${project}" && python -m build)
+            fi
+          done
+        fi
+        if [ -n "{{.NODE_PROJECT_DIRS}}" ]; then
+          ran=1
+          for project in {{.NODE_PROJECT_DIRS}}; do
+            echo "Building Node project ${project}"
+            (cd "${project}" && npm run build)
+          done
+        fi
+        if [ "${ran}" -eq 0 ]; then
+          echo "Unable to detect a supported project language"
+          exit 1
+        fi
 
   test:
-    desc: Run tests for the detected project language
+    desc: Run tests for all detected project languages
     cmds:
       - |
         set -e
-        case "{{.LANGUAGE}}" in
-          go)
-            for module in {{.GO_MODULE_DIRS}}; do
-              echo "Testing ${module}"
-              (cd "${module}" && go test ./...)
-            done
-            ;;
-          python)
-            pytest
-            ;;
-          node)
-            npm test
-            ;;
-          *)
-            echo "Unable to detect a supported project language"
-            exit 1
-            ;;
-        esac
+        ran=0
+        if [ -n "{{.GO_MODULE_DIRS}}" ]; then
+          ran=1
+          for module in {{.GO_MODULE_DIRS}}; do
+            echo "Testing Go module ${module}"
+            (cd "${module}" && go test ./...)
+          done
+        fi
+        if [ -n "{{.PYTHON_PROJECT_DIRS}}" ]; then
+          ran=1
+          for project in {{.PYTHON_PROJECT_DIRS}}; do
+            echo "Testing Python project ${project}"
+            if command -v uv >/dev/null 2>&1; then
+              (cd "${project}" && uv run pytest)
+            else
+              (cd "${project}" && pytest)
+            fi
+          done
+        fi
+        if [ -n "{{.NODE_PROJECT_DIRS}}" ]; then
+          ran=1
+          for project in {{.NODE_PROJECT_DIRS}}; do
+            echo "Testing Node project ${project}"
+            (cd "${project}" && npm test)
+          done
+        fi
+        if [ "${ran}" -eq 0 ]; then
+          echo "Unable to detect a supported project language"
+          exit 1
+        fi
 
   lint:
-    desc: Run lint checks for the detected project language
+    desc: Run lint checks for all detected project languages
     cmds:
       - |
         set -e
-        case "{{.LANGUAGE}}" in
-          go)
-            for module in {{.GO_MODULE_DIRS}}; do
-              echo "Linting ${module}"
-              if command -v golangci-lint >/dev/null 2>&1; then
-                (cd "${module}" && golangci-lint run --timeout 5m ./...)
-              else
-                (cd "${module}" && go vet ./...)
-              fi
-            done
-            ;;
-          python)
-            ruff check .
-            ;;
-          node)
-            npm run lint
-            ;;
-          *)
-            echo "Unable to detect a supported project language"
-            exit 1
-            ;;
-        esac
+        ran=0
+        if [ -n "{{.GO_MODULE_DIRS}}" ]; then
+          ran=1
+          for module in {{.GO_MODULE_DIRS}}; do
+            echo "Linting Go module ${module}"
+            if command -v golangci-lint >/dev/null 2>&1; then
+              (cd "${module}" && golangci-lint run --timeout 5m ./...)
+            else
+              (cd "${module}" && go vet ./...)
+            fi
+          done
+        fi
+        if [ -n "{{.PYTHON_PROJECT_DIRS}}" ]; then
+          ran=1
+          for project in {{.PYTHON_PROJECT_DIRS}}; do
+            echo "Linting Python project ${project}"
+            if command -v uv >/dev/null 2>&1; then
+              (cd "${project}" && uv run ruff check .)
+            else
+              (cd "${project}" && ruff check .)
+            fi
+          done
+        fi
+        if [ -n "{{.NODE_PROJECT_DIRS}}" ]; then
+          ran=1
+          for project in {{.NODE_PROJECT_DIRS}}; do
+            echo "Linting Node project ${project}"
+            (cd "${project}" && npm run lint)
+          done
+        fi
+        if [ "${ran}" -eq 0 ]; then
+          echo "Unable to detect a supported project language"
+          exit 1
+        fi
 
   clean:
     desc: Clean build and test artifacts
     cmds:
       - |
         set -e
-        case "{{.LANGUAGE}}" in
-          go)
-            for module in {{.GO_MODULE_DIRS}}; do
-              echo "Cleaning ${module}"
-              (cd "${module}" && go clean -testcache -fuzzcache)
-            done
-            ;;
-          python)
-            rm -rf build/ dist/ .pytest_cache/ .ruff_cache/ .mypy_cache/
-            find . -type d -name __pycache__ -prune -exec rm -rf {} +
-            rm -f .coverage coverage.xml
-            ;;
-          node)
-            rm -rf dist/ build/ coverage/ node_modules/.cache/ .next/
-            ;;
-          *)
-            rm -rf bin/ dist/ build/ coverage/ .pytest_cache/ .ruff_cache/ .mypy_cache/
-            rm -f coverage.out coverage.html .coverage coverage.xml
-            ;;
-        esac
+        ran=0
+        if [ -n "{{.GO_MODULE_DIRS}}" ]; then
+          ran=1
+          for module in {{.GO_MODULE_DIRS}}; do
+            echo "Cleaning Go module ${module}"
+            (cd "${module}" && go clean -testcache -fuzzcache)
+          done
+        fi
+        if [ -n "{{.PYTHON_PROJECT_DIRS}}" ]; then
+          ran=1
+          for project in {{.PYTHON_PROJECT_DIRS}}; do
+            echo "Cleaning Python project ${project}"
+            find "${project}" -type d \( -name build -o -name dist -o -name .pytest_cache -o -name .ruff_cache -o -name .mypy_cache -o -name __pycache__ \) -prune -exec rm -rf {} +
+            find "${project}" -type f \( -name .coverage -o -name coverage.xml \) -delete
+          done
+        fi
+        if [ -n "{{.NODE_PROJECT_DIRS}}" ]; then
+          ran=1
+          for project in {{.NODE_PROJECT_DIRS}}; do
+            echo "Cleaning Node project ${project}"
+            find "${project}" -maxdepth 2 -type d \( -name dist -o -name build -o -name coverage -o -name .next \) -prune -exec rm -rf {} +
+          done
+        fi
+        if [ "${ran}" -eq 0 ]; then
+          echo "Unable to detect a supported project language"
+          exit 1
+        fi
