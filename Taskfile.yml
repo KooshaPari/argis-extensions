@@ -86,16 +86,17 @@ tasks:
         done
 
   clean:
-    desc: Clean Go build/test caches and generated build artifacts
+    desc: Clean local build artifacts and test caches
     cmds:
       - |
         set -e
         for module in {{.GO_MODULES}}; do
           echo "Cleaning ${module}"
-          (cd "${module}" && go clean -cache -testcache -fuzzcache)
+          (cd "${module}" && go clean -testcache -fuzzcache)
         done
         for project in {{.PYTHON_PROJECTS}}; do
           echo "Cleaning ${project}"
           rm -rf "${project}/dist" "${project}/build" "${project}"/*.egg-info
+          find "${project}" -type d \( -name __pycache__ -o -name .pytest_cache -o -name .ruff_cache \) -prune -exec rm -rf {} +
         done
         rm -rf {{.BUILD_ARTIFACTS}}
