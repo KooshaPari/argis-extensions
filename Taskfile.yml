@@ -2,6 +2,7 @@ version: "3"
 
 vars:
   BUILD_ARTIFACTS: bin dist coverage.out coverage.html
+  GO_ROOT_BUILD_TARGETS: ./cmd/bifrost ./cmd/bifrost-enhanced
   GO_BUILD_FLAGS: ./...
   GO_TEST_FLAGS: ./...
   GOLANGCI_LINT_ARGS: run --timeout 5m ./...
@@ -43,7 +44,15 @@ tasks:
         set -e
         for module in {{.GO_MODULES}}; do
           echo "Building ${module}"
-          (cd "${module}" && go build {{.GO_BUILD_FLAGS}})
+          if [ "${module}" = "." ]; then
+            mkdir -p bin
+            for target in {{.GO_ROOT_BUILD_TARGETS}}; do
+              name="$(basename "${target}")"
+              go build -o "bin/${name}" "${target}"
+            done
+          else
+            (cd "${module}" && go build {{.GO_BUILD_FLAGS}})
+          fi
         done
         for project in {{.PYTHON_PROJECTS}}; do
           echo "Building ${project}"
