@@ -1,26 +1,94 @@
 version: '3'
 
+vars:
+  LANGUAGE:
+    sh: |
+      if [ -f go.mod ]; then
+        echo go
+      elif [ -f pyproject.toml ] || find . -name pyproject.toml -print -quit | grep -q .; then
+        echo python
+      elif [ -f package.json ] || find . -name package.json -print -quit | grep -q .; then
+        echo node
+      else
+        echo unknown
+      fi
+
 tasks:
   build:
-    desc: "Build the Go project"
+    desc: "Build the detected project"
     cmds:
-      - go build -v ./...
+      - |
+        set -e
+        case "{{.LANGUAGE}}" in
+          go)
+            go build -v ./...
+            ;;
+          python)
+            python -m build
+            ;;
+          node)
+            npm run build
+            ;;
+          *)
+            echo "Unable to detect a supported project language"
+            exit 1
+            ;;
+        esac
 
   test:
-    desc: "Run all tests"
+    desc: "Run the detected test suite"
     cmds:
-      - go test -v -race ./...
+      - |
+        set -e
+        case "{{.LANGUAGE}}" in
+          go)
+            go test -v -race ./...
+            ;;
+          python)
+            pytest
+            ;;
+          node)
+            npm test
+            ;;
+          *)
+            echo "Unable to detect a supported project language"
+            exit 1
+            ;;
+        esac
+
+  lint:
+    desc: "Run the detected linter"
+    cmds:
+      - |
+        set -e
+        case "{{.LANGUAGE}}" in
+          go)
+            golangci-lint run ./...
+            ;;
+          python)
+            ruff check .
+            ;;
+          node)
+            npm run lint
+            ;;
+          *)
+            echo "Unable to detect a supported project language"
+            exit 1
+            ;;
+        esac
+
+  clean:
+    desc: "Clean build artifacts"
+    cmds:
+      - rm -rf bin/ dist/ build/ .pytest_cache/ .ruff_cache/
+      - rm -f coverage.out coverage.html
+      - go clean -cache -testcache
 
   test-cover:
     desc: "Run tests with coverage"
     cmds:
       - go test -coverprofile=coverage.out ./...
       - go tool cover -html=coverage.out -o coverage.html
-
-  lint:
-    desc: "Run linter"
-    cmds:
-      - golangci-lint run ./...
 
   format:
     desc: "Format code"
@@ -31,12 +99,6 @@ tasks:
     desc: "Run go vet"
     cmds:
       - go vet ./...
-
-  clean:
-    desc: "Clean build artifacts"
-    cmds:
-      - rm -rf bin/
-      - rm -f coverage.out coverage.html
 
   deps:
     desc: "Download and verify dependencies"
@@ -57,7 +119,6 @@ tasks:
       - task: lint
       - task: test
 
-  # CLI specific targets
   cli-build:
     desc: "Build CLI binary"
     cmds:
