@@ -1,10 +1,11 @@
 version: "3"
 
 vars:
-  BUILD_ARTIFACTS: bin dist coverage.out coverage.html
+  BUILD_ARTIFACTS: bin dist coverage.out coverage.html .coverage
   GO_ROOT_BUILD_TARGETS: ./cmd/bifrost ./cmd/bifrost-enhanced
   GO_BUILD_FLAGS: ./...
   GO_TEST_FLAGS: ./...
+  GO_CLEAN_FLAGS: -testcache -fuzzcache
   GOLANGCI_LINT_ARGS: run --timeout 5m ./...
   PYTEST_ARGS:
   RUFF_CHECK_ARGS: .
@@ -110,7 +111,7 @@ tasks:
         set -e
         for module in {{.GO_MODULES}}; do
           echo "Cleaning ${module}"
-          (cd "${module}" && go clean -testcache -fuzzcache)
+          (cd "${module}" && go clean {{.GO_CLEAN_FLAGS}})
         done
         for project in {{.PYTHON_PROJECTS}}; do
           echo "Cleaning ${project}"
