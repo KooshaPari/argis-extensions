@@ -12,28 +12,21 @@ vars:
       else
         echo unknown
       fi
-  GO_MODULES:
-    sh: |
-      find . -name go.mod -not -path "*/vendor/*" -not -path "*/.git/*" -exec dirname {} \; | sort
 
 tasks:
   default:
-    desc: "Build the detected project"
+    desc: Run the build task
     cmds:
       - task: build
 
   build:
-    desc: "Build the detected project"
+    desc: Build the detected project
     cmds:
       - |
         set -e
         case "{{.LANGUAGE}}" in
           go)
-            printf '%s\n' "{{.GO_MODULES}}" | while IFS= read -r module; do
-              [ -n "${module}" ] || continue
-              echo "==> go build ${module}"
-              (cd "${module}" && go build -v ./...)
-            done
+            go build ./...
             ;;
           python)
             python -m build
@@ -48,17 +41,13 @@ tasks:
         esac
 
   test:
-    desc: "Run the detected test suite"
+    desc: Run tests for the detected project
     cmds:
       - |
         set -e
         case "{{.LANGUAGE}}" in
           go)
-            printf '%s\n' "{{.GO_MODULES}}" | while IFS= read -r module; do
-              [ -n "${module}" ] || continue
-              echo "==> go test ${module}"
-              (cd "${module}" && go test -v ./...)
-            done
+            go test ./...
             ;;
           python)
             pytest
@@ -73,21 +62,17 @@ tasks:
         esac
 
   lint:
-    desc: "Run the detected linter"
+    desc: Run lint checks for the detected project
     cmds:
       - |
         set -e
         case "{{.LANGUAGE}}" in
           go)
-            printf '%s\n' "{{.GO_MODULES}}" | while IFS= read -r module; do
-              [ -n "${module}" ] || continue
-              echo "==> go lint ${module}"
-              if command -v golangci-lint >/dev/null 2>&1; then
-                (cd "${module}" && golangci-lint run --timeout 10m ./...)
-              else
-                (cd "${module}" && go vet ./...)
-              fi
-            done
+            if command -v golangci-lint >/dev/null 2>&1; then
+              golangci-lint run ./...
+            else
+              go vet ./...
+            fi
             ;;
           python)
             ruff check .
@@ -102,73 +87,25 @@ tasks:
         esac
 
   clean:
-    desc: "Clean build artifacts"
+    desc: Clean build and test artifacts
     cmds:
       - |
         set -e
         case "{{.LANGUAGE}}" in
           go)
-            printf '%s\n' "{{.GO_MODULES}}" | while IFS= read -r module; do
-              [ -n "${module}" ] || continue
-              echo "==> go clean ${module}"
-              (cd "${module}" && go clean -testcache)
-            done
+            go clean -testcache
             rm -rf bin/ coverage.out coverage.html
             ;;
           python)
-            rm -rf build/ dist/ .pytest_cache/ .ruff_cache/ .mypy_cache/ __pycache__/
+            rm -rf build/ dist/ .pytest_cache/ .ruff_cache/ .mypy_cache/
+            find . -type d -name __pycache__ -prune -exec rm -rf {} +
             rm -f .coverage coverage.xml
             ;;
           node)
             rm -rf dist/ build/ coverage/ node_modules/.cache/ .next/
             ;;
           *)
-            rm -rf bin/ dist/ build/ .pytest_cache/ .ruff_cache/ .mypy_cache/
+            rm -rf bin/ dist/ build/ coverage/ .pytest_cache/ .ruff_cache/ .mypy_cache/
             rm -f coverage.out coverage.html .coverage coverage.xml
             ;;
         esac
-
-  test-cover:
-    desc: "Run tests with coverage"
-    cmds:
-      - go test -coverprofile=coverage.out ./...
-      - go tool cover -html=coverage.out -o coverage.html
-
-  format:
-    desc: "Format code"
-    cmds:
-      - go fmt ./...
-
-  vet:
-    desc: "Run go vet"
-    cmds:
-      - go vet ./...
-
-  deps:
-    desc: "Download and verify dependencies"
-    cmds:
-      - go mod download
-      - go mod verify
-
-  security:
-    desc: "Run security audit"
-    cmds:
-      - go run golang.org/x/vulncheck/cmd/govulncheck@latest ./...
-
-  ci:
-    desc: "Run full CI pipeline"
-    cmds:
-      - task: format
-      - task: vet
-      - task: lint
-      - task: test
-
-  cli-build:
-    desc: "Build CLI binary"
-    cmds:
-      - go build -o bin/bifrost ./cmd/bifrost
-
-  cli-install:
-    desc: "Install CLI globally"
-    cmds:
-      - go install ./cmd/bifrost
