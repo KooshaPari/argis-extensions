@@ -5,6 +5,6 @@
 - The repo contains secondary Python manifests under subdirectories, but the root Go module remains the
   primary build surface.
 - Local validation still shows repo/environment blockers in the Go toolchain path:
-  - `go build` and `go test` fail on missing generated package `api/graphql/gen`.
+  - `task build` fails on missing `go.sum` entries and the generated package `api/graphql/gen`.
   - The local Go cache/toolchain emitted missing standard-library cache errors during `go test` and
     `golangci-lint`.

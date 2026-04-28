@@ -7,9 +7,9 @@ vars:
     sh: |
       if [ -f go.mod ]; then
         echo go
-      elif [ -f pyproject.toml ] || find . -name pyproject.toml -print -quit | grep -q .; then
+      elif [ -f pyproject.toml ]; then
         echo python
-      elif [ -f package.json ] || find . -name package.json -print -quit | grep -q .; then
+      elif [ -f package.json ]; then
         echo node
       else
         echo unknown

@@ -8,6 +8,6 @@ Required behavior:
 
 Language detection:
 - Prefer `go` when `go.mod` exists at the repo root.
-- Fall back to `python` when Python manifests are present.
-- Fall back to `node` when `package.json` is present.
+- Fall back to `python` when `pyproject.toml` exists at the repo root.
+- Fall back to `node` when `package.json` is present at the repo root.
 - Fail clearly when no supported language is detected.
