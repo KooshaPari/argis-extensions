@@ -1,6 +1,7 @@
 version: "3"
 
 vars:
+  BUILD_ARTIFACTS: bin dist coverage.out coverage.html
   GO_MODULES:
     sh: find . -name go.mod -not -path "./.git/*" -exec dirname {} \; | sort | tr "\n" " "
 
@@ -50,7 +51,7 @@ tasks:
         done
 
   clean:
-    desc: Clean Go build and test caches
+    desc: Clean Go build/test caches and generated build artifacts
     cmds:
       - |
         set -e
@@ -58,3 +59,4 @@ tasks:
           echo "Cleaning ${module}"
           (cd "${module}" && go clean -cache -testcache -fuzzcache)
         done
+        rm -rf {{.BUILD_ARTIFACTS}}
