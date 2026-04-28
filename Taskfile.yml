@@ -109,7 +109,6 @@ tasks:
     cmds:
       - |
         set -e
-        go_cache="$(go env GOCACHE 2>/dev/null || true)"
         for module in {{.GO_MODULES}}; do
           echo "Cleaning ${module}"
           (cd "${module}" && go clean {{.GO_CLEAN_FLAGS}})
@@ -119,7 +118,4 @@ tasks:
           rm -rf "${project}/dist" "${project}/build" "${project}"/*.egg-info
           find "${project}" -type d \( -name __pycache__ -o -name .pytest_cache -o -name .ruff_cache \) -prune -exec rm -rf {} +
         done
-        if [ -n "${go_cache}" ] && [ "${go_cache}" != "off" ]; then
-          rm -rf "${go_cache}"
-        fi
         rm -rf {{.BUILD_ARTIFACTS}}
