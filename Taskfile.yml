@@ -7,6 +7,7 @@ vars:
       [ -n "$(find . -name go.mod -not -path './.git/*' -print -quit)" ] && languages="${languages} go"
       [ -n "$(find . -name pyproject.toml -not -path './.git/*' -print -quit)" ] && languages="${languages} python"
       [ -n "$(find . -name package.json -not -path './.git/*' -not -path './node_modules/*' -print -quit)" ] && languages="${languages} node"
+      [ -n "$(find . -name Cargo.toml -not -path './.git/*' -not -path './target/*' -print -quit)" ] && languages="${languages} rust"
       if [ -n "${languages}" ]; then
         echo "${languages# }"
       else
@@ -21,6 +22,9 @@ vars:
   NODE_PROJECT_DIRS:
     sh: |
       find . -name package.json -not -path './.git/*' -not -path './node_modules/*' -exec dirname {} \; | sort | tr '\n' ' '
+  RUST_PROJECT_DIRS:
+    sh: |
+      find . -name Cargo.toml -not -path './.git/*' -not -path './target/*' -exec dirname {} \; | sort | tr '\n' ' '
 
 tasks:
   default:
@@ -64,6 +68,13 @@ tasks:
             (cd "${project}" && npm run build)
           done
         fi
+        if [ -n "{{.RUST_PROJECT_DIRS}}" ]; then
+          ran=1
+          for project in {{.RUST_PROJECT_DIRS}}; do
+            echo "Building Rust project ${project}"
+            (cd "${project}" && cargo build)
+          done
+        fi
         if [ "${ran}" -eq 0 ]; then
           echo "Unable to detect a supported project language"
           exit 1
@@ -98,6 +109,13 @@ tasks:
           for project in {{.NODE_PROJECT_DIRS}}; do
             echo "Testing Node project ${project}"
             (cd "${project}" && npm test)
+          done
+        fi
+        if [ -n "{{.RUST_PROJECT_DIRS}}" ]; then
+          ran=1
+          for project in {{.RUST_PROJECT_DIRS}}; do
+            echo "Testing Rust project ${project}"
+            (cd "${project}" && cargo test)
           done
         fi
         if [ "${ran}" -eq 0 ]; then
@@ -140,6 +158,13 @@ tasks:
             (cd "${project}" && npm run lint)
           done
         fi
+        if [ -n "{{.RUST_PROJECT_DIRS}}" ]; then
+          ran=1
+          for project in {{.RUST_PROJECT_DIRS}}; do
+            echo "Linting Rust project ${project}"
+            (cd "${project}" && cargo clippy --all-targets --all-features -- -D warnings)
+          done
+        fi
         if [ "${ran}" -eq 0 ]; then
           echo "Unable to detect a supported project language"
           exit 1
@@ -171,6 +196,13 @@ tasks:
           for project in {{.NODE_PROJECT_DIRS}}; do
             echo "Cleaning Node project ${project}"
             find "${project}" -maxdepth 2 -type d \( -name dist -o -name build -o -name coverage -o -name .next \) -prune -exec rm -rf {} +
+          done
+        fi
+        if [ -n "{{.RUST_PROJECT_DIRS}}" ]; then
+          ran=1
+          for project in {{.RUST_PROJECT_DIRS}}; do
+            echo "Cleaning Rust project ${project}"
+            (cd "${project}" && cargo clean)
           done
         fi
         if [ "${ran}" -eq 0 ]; then
