@@ -12,6 +12,9 @@ vars:
       else
         echo unknown
       fi
+  GO_MODULE_DIRS:
+    sh: |
+      find . -name go.mod -not -path './.git/*' -exec dirname {} \; | sort | tr '\n' ' '
 
 tasks:
   default:
@@ -26,7 +29,10 @@ tasks:
         set -e
         case "{{.LANGUAGE}}" in
           go)
-            go build ./...
+            for module in {{.GO_MODULE_DIRS}}; do
+              echo "Building ${module}"
+              (cd "${module}" && go build ./...)
+            done
             ;;
           python)
             python -m build
@@ -47,7 +53,10 @@ tasks:
         set -e
         case "{{.LANGUAGE}}" in
           go)
-            go test ./...
+            for module in {{.GO_MODULE_DIRS}}; do
+              echo "Testing ${module}"
+              (cd "${module}" && go test ./...)
+            done
             ;;
           python)
             pytest
@@ -68,11 +77,14 @@ tasks:
         set -e
         case "{{.LANGUAGE}}" in
           go)
-            if command -v golangci-lint >/dev/null 2>&1; then
-              golangci-lint run --timeout 5m ./...
-            else
-              go vet ./...
-            fi
+            for module in {{.GO_MODULE_DIRS}}; do
+              echo "Linting ${module}"
+              if command -v golangci-lint >/dev/null 2>&1; then
+                (cd "${module}" && golangci-lint run --timeout 5m ./...)
+              else
+                (cd "${module}" && go vet ./...)
+              fi
+            done
             ;;
           python)
             ruff check .
@@ -93,8 +105,10 @@ tasks:
         set -e
         case "{{.LANGUAGE}}" in
           go)
-            go clean -testcache
-            rm -rf bin/ dist/ build/ coverage/ coverage.out coverage.html
+            for module in {{.GO_MODULE_DIRS}}; do
+              echo "Cleaning ${module}"
+              (cd "${module}" && go clean -testcache -fuzzcache)
+            done
             ;;
           python)
             rm -rf build/ dist/ .pytest_cache/ .ruff_cache/ .mypy_cache/
