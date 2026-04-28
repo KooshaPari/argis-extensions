@@ -2,6 +2,11 @@ version: "3"
 
 vars:
   BUILD_ARTIFACTS: bin dist coverage.out coverage.html
+  GO_BUILD_FLAGS: ./...
+  GO_TEST_FLAGS: ./...
+  GOLANGCI_LINT_ARGS: run --timeout 5m ./...
+  PYTEST_ARGS:
+  RUFF_CHECK_ARGS: .
   GO_MODULES:
     sh: find . -name go.mod -not -path "./.git/*" -exec dirname {} \; | sort | tr "\n" " "
   PYTHON_PROJECTS:
@@ -34,7 +39,7 @@ tasks:
         set -e
         for module in {{.GO_MODULES}}; do
           echo "Building ${module}"
-          (cd "${module}" && go build ./...)
+          (cd "${module}" && go build {{.GO_BUILD_FLAGS}})
         done
         for project in {{.PYTHON_PROJECTS}}; do
           echo "Building ${project}"
@@ -52,14 +57,14 @@ tasks:
         set -e
         for module in {{.GO_MODULES}}; do
           echo "Testing ${module}"
-          (cd "${module}" && go test ./...)
+          (cd "${module}" && go test {{.GO_TEST_FLAGS}})
         done
         for project in {{.PYTHON_PROJECTS}}; do
           echo "Testing ${project}"
           if command -v uv >/dev/null 2>&1; then
-            (cd "${project}" && uv run pytest)
+            (cd "${project}" && uv run pytest {{.PYTEST_ARGS}})
           else
-            (cd "${project}" && python -m pytest)
+            (cd "${project}" && python -m pytest {{.PYTEST_ARGS}})
           fi
         done
 
@@ -71,17 +76,17 @@ tasks:
         for module in {{.GO_MODULES}}; do
           echo "Linting ${module}"
           if command -v golangci-lint >/dev/null 2>&1; then
-            (cd "${module}" && golangci-lint run --timeout 5m ./...)
+            (cd "${module}" && golangci-lint {{.GOLANGCI_LINT_ARGS}})
           else
-            (cd "${module}" && go vet ./...)
+            (cd "${module}" && go vet {{.GO_TEST_FLAGS}})
           fi
         done
         for project in {{.PYTHON_PROJECTS}}; do
           echo "Linting ${project}"
           if command -v uv >/dev/null 2>&1; then
-            (cd "${project}" && uv run ruff check .)
+            (cd "${project}" && uv run ruff check {{.RUFF_CHECK_ARGS}})
           else
-            (cd "${project}" && python -m ruff check .)
+            (cd "${project}" && python -m ruff check {{.RUFF_CHECK_ARGS}})
           fi
         done
 
