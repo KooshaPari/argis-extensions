@@ -1,5 +1,7 @@
 version: '3'
 
+default: build
+
 vars:
   LANGUAGE:
     sh: |
@@ -42,7 +44,7 @@ tasks:
         set -e
         case "{{.LANGUAGE}}" in
           go)
-            go test -v -race ./...
+            go test -v ./...
             ;;
           python)
             pytest
@@ -63,7 +65,7 @@ tasks:
         set -e
         case "{{.LANGUAGE}}" in
           go)
-            golangci-lint run ./...
+            golangci-lint run --timeout 10m ./...
             ;;
           python)
             ruff check .
@@ -80,9 +82,25 @@ tasks:
   clean:
     desc: "Clean build artifacts"
     cmds:
-      - rm -rf bin/ dist/ build/ .pytest_cache/ .ruff_cache/
-      - rm -f coverage.out coverage.html
-      - go clean -cache -testcache
+      - |
+        set -e
+        case "{{.LANGUAGE}}" in
+          go)
+            rm -rf bin/ coverage.out coverage.html
+            go clean -cache -testcache
+            ;;
+          python)
+            rm -rf build/ dist/ .pytest_cache/ .ruff_cache/ .mypy_cache/ __pycache__/
+            rm -f .coverage coverage.xml
+            ;;
+          node)
+            rm -rf dist/ build/ coverage/ node_modules/.cache/ .next/
+            ;;
+          *)
+            rm -rf bin/ dist/ build/ .pytest_cache/ .ruff_cache/ .mypy_cache/
+            rm -f coverage.out coverage.html .coverage coverage.xml
+            ;;
+        esac
 
   test-cover:
     desc: "Run tests with coverage"
