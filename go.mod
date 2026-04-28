@@ -3,7 +3,7 @@ module github.com/kooshapari/bifrost-extensions
 go 1.25.0
 
 require (
-	connectrpc.com/connect v1.19.1
+	connectrpc.com/connect v1.19.2
 	github.com/99designs/gqlgen v0.17.90
 	github.com/bytedance/sonic v1.15.0
 	github.com/fsnotify/fsnotify v1.9.0
