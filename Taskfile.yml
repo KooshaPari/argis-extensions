@@ -4,20 +4,31 @@ vars:
   BUILD_ARTIFACTS: bin dist coverage.out coverage.html
   GO_MODULES:
     sh: find . -name go.mod -not -path "./.git/*" -exec dirname {} \; | sort | tr "\n" " "
+  PYTHON_PROJECTS:
+    sh: find . -name pyproject.toml -not -path "./.git/*" -exec dirname {} \; | sort | tr "\n" " "
 
 tasks:
   default:
-    desc: Build all Go modules
+    desc: Build all detected projects
     cmds:
       - task: build
 
   detect:
-    desc: Print detected project language
+    desc: Print detected project languages
     cmds:
-      - echo "go"
+      - |
+        set -e
+        languages=""
+        if [ -n "{{.GO_MODULES}}" ]; then
+          languages="${languages} go"
+        fi
+        if [ -n "{{.PYTHON_PROJECTS}}" ]; then
+          languages="${languages} python"
+        fi
+        echo "${languages# }"
 
   build:
-    desc: Build all Go modules
+    desc: Build all detected projects
     cmds:
       - |
         set -e
@@ -25,9 +36,17 @@ tasks:
           echo "Building ${module}"
           (cd "${module}" && go build ./...)
         done
+        for project in {{.PYTHON_PROJECTS}}; do
+          echo "Building ${project}"
+          if command -v uv >/dev/null 2>&1; then
+            (cd "${project}" && uv build)
+          else
+            (cd "${project}" && python -m build)
+          fi
+        done
 
   test:
-    desc: Run Go tests
+    desc: Run tests for all detected projects
     cmds:
       - |
         set -e
@@ -35,9 +54,17 @@ tasks:
           echo "Testing ${module}"
           (cd "${module}" && go test ./...)
         done
+        for project in {{.PYTHON_PROJECTS}}; do
+          echo "Testing ${project}"
+          if command -v uv >/dev/null 2>&1; then
+            (cd "${project}" && uv run pytest)
+          else
+            (cd "${project}" && python -m pytest)
+          fi
+        done
 
   lint:
-    desc: Run Go lint checks
+    desc: Run lint checks for all detected projects
     cmds:
       - |
         set -e
@@ -49,6 +76,14 @@ tasks:
             (cd "${module}" && go vet ./...)
           fi
         done
+        for project in {{.PYTHON_PROJECTS}}; do
+          echo "Linting ${project}"
+          if command -v uv >/dev/null 2>&1; then
+            (cd "${project}" && uv run ruff check .)
+          else
+            (cd "${project}" && python -m ruff check .)
+          fi
+        done
 
   clean:
     desc: Clean Go build/test caches and generated build artifacts
@@ -58,5 +93,9 @@ tasks:
         for module in {{.GO_MODULES}}; do
           echo "Cleaning ${module}"
           (cd "${module}" && go clean -cache -testcache -fuzzcache)
+        done
+        for project in {{.PYTHON_PROJECTS}}; do
+          echo "Cleaning ${project}"
+          rm -rf "${project}/dist" "${project}/build" "${project}"/*.egg-info
         done
         rm -rf {{.BUILD_ARTIFACTS}}
