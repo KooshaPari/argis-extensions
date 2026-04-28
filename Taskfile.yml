@@ -3,7 +3,7 @@ version: '3'
 vars:
   LANGUAGE:
     sh: |
-      if [ -f go.mod ]; then
+      if [ -f go.work ] || [ -f go.mod ]; then
         echo go
       elif [ -f pyproject.toml ]; then
         echo python
@@ -20,7 +20,7 @@ tasks:
       - task: build
 
   build:
-    desc: Build the detected project
+    desc: Build the detected project language
     cmds:
       - |
         set -e
@@ -41,7 +41,7 @@ tasks:
         esac
 
   test:
-    desc: Run tests for the detected project
+    desc: Run tests for the detected project language
     cmds:
       - |
         set -e
@@ -62,14 +62,14 @@ tasks:
         esac
 
   lint:
-    desc: Run lint checks for the detected project
+    desc: Run lint checks for the detected project language
     cmds:
       - |
         set -e
         case "{{.LANGUAGE}}" in
           go)
             if command -v golangci-lint >/dev/null 2>&1; then
-              golangci-lint run ./...
+              golangci-lint run --timeout 5m ./...
             else
               go vet ./...
             fi
@@ -94,7 +94,7 @@ tasks:
         case "{{.LANGUAGE}}" in
           go)
             go clean -testcache
-            rm -rf bin/ coverage.out coverage.html
+            rm -rf bin/ dist/ build/ coverage/ coverage.out coverage.html
             ;;
           python)
             rm -rf build/ dist/ .pytest_cache/ .ruff_cache/ .mypy_cache/
