@@ -124,4 +124,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/maximhq/bifrost/core => /Users/kooshapari/CodeProjects/Phenotype/repos/bifrost-extensions/bifrost/core
+replace github.com/maximhq/bifrost/core => ./bifrost/core
