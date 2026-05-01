@@ -24,13 +24,16 @@ type Server struct {
 	logger    *slog.Logger
 	metrics   *Metrics
 	startTime time.Time
-	
+
+	// HTTP server for graceful shutdown
+	srv *http.Server
+
 	// Sub-servers
-	connect   *connect.Server
-	graphql   *graphql.Server
-	
+	connect *connect.Server
+	graphql *graphql.Server
+
 	// Configuration
-	config    Config
+	config Config
 }
 
 // Config holds server configuration
@@ -168,13 +171,40 @@ func (s *Server) Handler() http.Handler {
 
 // ListenAndServe starts the unified server
 func (s *Server) ListenAndServe() error {
+	s.srv = &http.Server{
+		Addr:    s.config.UnifiedAddr,
+		Handler: s.router,
+	}
 	s.logger.Info("starting unified API server", "address", s.config.UnifiedAddr)
-	return http.ListenAndServe(s.config.UnifiedAddr, s.router)
+	return s.srv.ListenAndServe()
 }
 
 // Shutdown gracefully shuts down the server
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.logger.Info("shutting down API server")
+
+	// Cancel sub-servers if they support context cancellation
+	if s.connect != nil {
+		s.logger.Debug("shutting down connect server")
+	}
+	if s.graphql != nil {
+		s.logger.Debug("shutting down graphql server")
+	}
+
+	// If no server is running, return early
+	if s.srv == nil {
+		s.logger.Info("no server running, shutdown complete")
+		return nil
+	}
+
+	// Actually shut down the HTTP server
+	s.logger.Info("initiating HTTP server shutdown")
+	if err := s.srv.Shutdown(ctx); err != nil {
+		s.logger.Error("HTTP server shutdown failed", "error", err)
+		return err
+	}
+
+	s.logger.Info("API server shutdown complete")
 	return nil
 }
 

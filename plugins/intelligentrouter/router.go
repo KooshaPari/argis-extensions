@@ -232,7 +232,7 @@ func (ir *IntelligentRouter) PreHook(ctx context.Context, req *schemas.BifrostRe
 }
 
 // PostHook is called after request processing
-func (ir *IntelligentRouter) PostHook(ctx context.Context, resp *schemas.BifrostResponse, err error) (*schemas.BifrostResponse, *schemas.BifrostError, error) {
+func (ir *IntelligentRouter) PostHook(ctx context.Context, resp *schemas.BifrostResponse) (*schemas.BifrostResponse, *schemas.BifrostError, error) {
 	return resp, nil, nil
 }
 

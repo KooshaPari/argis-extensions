@@ -205,7 +205,7 @@ func (ir *IntelligentRouter) applyDecision(req *schemas.BifrostRequest, decision
 	// Clone request and update model/provider using the proper methods
 	modifiedReq := *req
 	modifiedReq.SetModel(decision.SelectedModel)
-	modifiedReq.SetProvider(decision.SelectedProvider)
+	modifiedReq.SetProvider(string(decision.SelectedProvider))
 
 	return &modifiedReq
 }
