@@ -101,7 +101,6 @@ func (pw *PluginWrapper) PreHook(
 func (pw *PluginWrapper) PostHook(
 	ctx context.Context,
 	resp *schemas.BifrostResponse,
-	err error,
 ) (*schemas.BifrostResponse, *schemas.BifrostError, error) {
 	var resultResp *schemas.BifrostResponse
 	var resultErr *schemas.BifrostError
@@ -109,7 +108,7 @@ func (pw *PluginWrapper) PostHook(
 
 	// Execute with circuit breaker protection
 	cbErr := pw.circuitBreaker.Execute(ctx, func() error {
-		resultResp, resultErr, hookErr = pw.plugin.PostHook(ctx, resp, err)
+		resultResp, resultErr, hookErr = pw.plugin.PostHook(ctx, resp)
 		if hookErr != nil {
 			return hookErr
 		}

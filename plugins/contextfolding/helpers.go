@@ -36,7 +36,7 @@ func (cf *ContextFolding) summarizeResponse(ctx context.Context, resp *schemas.B
 	}
 	
 	// Get the content from the response
-	content := resp.ChatResponse.Content()
+	content := resp.ChatResponse.Content
 	if content == "" {
 		return
 	}

@@ -137,21 +137,10 @@ func (s *Server) convertToChatRequest(req *ChatCompletionRequest) *schemas.ChatR
 		})
 	}
 
-	params := &schemas.ChatParameters{}
-	if req.MaxTokens != nil {
-		params.MaxCompletionTokens = *req.MaxTokens
-	}
-	if req.Temperature != nil {
-		params.Temperature = *req.Temperature
-	}
-	if req.TopP != nil {
-		params.TopP = *req.TopP
-	}
-
 	return &schemas.ChatRequest{
-		Messages: messages,
+		Messages:  messages,
 		Model:    req.Model,
-		Params:   params,
+		MaxTokens: 0,
 	}
 }
 

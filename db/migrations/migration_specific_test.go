@@ -1,13 +1,10 @@
 package migrations
 
 import (
-	"context"
 	"database/sql"
 	"testing"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // TestMigration001_InitialSchema tests the initial schema migration

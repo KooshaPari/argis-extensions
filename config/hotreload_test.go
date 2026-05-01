@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -54,9 +53,6 @@ func TestHotReloadNoDowntime(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.yaml")
-
 	// TODO: Implement hot-reload without downtime test
 	// This test should:
 	// 1. Start server with initial config
@@ -105,9 +101,6 @@ server:
 
 // TestHotReloadSections tests hot-reload for different config sections
 func TestHotReloadSections(t *testing.T) {
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.yaml")
-
 	tests := []struct {
 		name           string
 		initialConfig  string
@@ -216,9 +209,6 @@ plugins:
 
 // TestConcurrentConfigChanges tests handling of concurrent config changes
 func TestConcurrentConfigChanges(t *testing.T) {
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.yaml")
-
 	// TODO: Implement concurrent changes test
 	// This test should:
 	// 1. Create config with watcher

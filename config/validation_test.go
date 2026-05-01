@@ -2,9 +2,6 @@ package config
 
 import (
 	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // TestValidConfiguration tests that valid configuration passes validation
