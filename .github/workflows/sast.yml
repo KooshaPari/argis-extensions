@@ -8,9 +8,9 @@ jobs:
   codeql:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.1.1
-      - uses: github/codeql-action/init-action@v3
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11@{"message":"Not Found","documentation_url":"https://docs.github.com/rest/repos/repos#get-a-repository","status":"404"}
+      - uses: github/codeql-action/init-action@{"message":"Not Found","documentation_url":"https://docs.github.com/rest/commits/commits#get-a-commit","status":"404"}
         with:
           languages: [typescript, python, rust, go]
-      - uses: github/codeql-action/autobuild@19b3a84f58f551a99396341585444cb37be03324  # was: no ref (default branch)
-      - uses: github/codeql-action/analyze@19b3a84f58f551a99396341585444cb37be03324  # was: no ref (default branch)
+      - uses: github/codeql-action/autobuild@{"message":"Not Found","documentation_url":"https://docs.github.com/rest/commits/commits#get-a-commit","status":"404"}
+      - uses: github/codeql-action/analyze@{"message":"Not Found","documentation_url":"https://docs.github.com/rest/commits/commits#get-a-commit","status":"404"}
