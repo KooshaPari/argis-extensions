@@ -128,23 +128,14 @@ func (fp *FallbackPlugin) PreHook(
 func (fp *FallbackPlugin) PostHook(
 	ctx context.Context,
 	resp *schemas.BifrostResponse,
-	err error,
 ) (*schemas.BifrostResponse, *schemas.BifrostError, error) {
-	if !fp.config.Enabled || err == nil {
+	if !fp.config.Enabled || resp == nil {
 		return resp, nil, nil
 	}
-
-	// Get attempt count
-	attempt, _ := ctx.Value(attemptCountKey).(int)
 
 	// Get strategy for provider
 	provider, _ := ctx.Value(originalProviderKey).(schemas.ModelProvider)
 	strategy := fp.getStrategy(provider)
-
-	// Check if we should retry
-	if !fp.shouldRetry(err, attempt, strategy) {
-		return resp, nil, nil
-	}
 
 	// Get fallback models
 	fallbackModels := fp.getFallbackModels(provider, strategy)
@@ -152,18 +143,7 @@ func (fp *FallbackPlugin) PostHook(
 		return resp, nil, nil
 	}
 
-	// Create BifrostError with fallback allowed
-	var bifrostErr *schemas.BifrostError
-	if err != nil {
-		bifrostErr = &schemas.BifrostError{
-			RawError: err,
-			Message:  err.Error(),
-		}
-		allowFallbacks := true
-		bifrostErr.AllowFallbacks = &allowFallbacks
-	}
-
-	return resp, bifrostErr, nil
+	return resp, nil, nil
 }
 
 // Cleanup releases resources

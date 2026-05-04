@@ -222,8 +222,8 @@ func extractRequestText(req *schemas.BifrostRequest) string {
 
 // extractResponseText extracts text from a Bifrost response
 func extractResponseText(resp *schemas.BifrostResponse) string {
-	if resp.ChatResponse != nil && resp.ChatResponse.Content() != "" {
-		return resp.ChatResponse.Content()
+	if resp.ChatResponse != nil && resp.ChatResponse.Content != "" {
+		return resp.ChatResponse.Content
 	}
 	return ""
 }

@@ -149,7 +149,7 @@ type VoyageUsage struct {
 }
 
 // handleEmbedding performs the embedding request to VoyageAI
-func (p *VoyagePlugin) handleEmbedding(ctx context.Context, req *schemas.BifrostEmbeddingRequest) (*schemas.BifrostEmbeddingResponse, *schemas.BifrostError) {
+func (p *VoyagePlugin) handleEmbedding(ctx context.Context, req *schemas.EmbeddingRequest) (*schemas.EmbeddingResponse, *schemas.BifrostError) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -217,7 +217,7 @@ func (p *VoyagePlugin) handleEmbedding(ctx context.Context, req *schemas.Bifrost
 	}
 
 // Convert to Bifrost format
-	bifrostResp := &schemas.BifrostEmbeddingResponse{
+	bifrostResp := &schemas.EmbeddingResponse{
 		Object: voyageResp.Object,
 		Model:  voyageResp.Model,
 		Data:   make([]schemas.EmbeddingData, len(voyageResp.Data)),
@@ -253,7 +253,7 @@ func (p *VoyagePlugin) Embed(ctx context.Context, text string, model string) ([]
 		model = Voyage35Lite
 	}
 
-	req := &schemas.BifrostEmbeddingRequest{
+	req := &schemas.EmbeddingRequest{
 		Provider: schemas.ModelProvider(ProviderKey),
 		Model:    model,
 		Input:    text,
@@ -277,7 +277,7 @@ func (p *VoyagePlugin) EmbedBatch(ctx context.Context, texts []string, model str
 		model = Voyage35Lite
 	}
 
-	req := &schemas.BifrostEmbeddingRequest{
+	req := &schemas.EmbeddingRequest{
 		Provider: schemas.ModelProvider(ProviderKey),
 		Model:    model,
 		Texts:    texts,

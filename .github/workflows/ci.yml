@@ -15,11 +15,11 @@ jobs:
         go-version: ['1.21', '1.22']
     
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11@{"message":"Not Found","documentation_url":"https://docs.github.com/rest/repos/repos#get-a-repository","status":"404"}
 
       
       - name: Setup Go
-        uses: actions/setup-go@7b8cf10d4e4a01d4992d18a89f4d7dc5a3e6d6f4
+        uses: actions/setup-go@{"message":"Not Found","documentation_url":"https://docs.github.com/rest/commits/commits#get-a-commit","status":"404"}
         with:
           go-version: $123matrix.go-version125
 
@@ -33,11 +33,11 @@ jobs:
         run: go test ./... -v -race -coverprofile=coverage.out
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@{"message":"Not Found","documentation_url":"https://docs.github.com/rest/commits/commits#get-a-commit","status":"404"}
         with:
           files: ./coverage.out
       
 
   phenotype-validate:
     runs-on: ubuntu-latest
-    uses: KooshaPari/phenotypeActions/.github/workflows/validate-governance.yml@main
+    uses: KooshaPari/phenotypeActions/.github/workflows/validate-governance.yml@{"message":"Not Found","documentation_url":"https://docs.github.com/rest/commits/commits#get-a-commit","status":"404"}

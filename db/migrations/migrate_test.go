@@ -1,14 +1,10 @@
 package migrations
 
 import (
-	"context"
 	"database/sql"
 	"testing"
-	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // TestMigrationSystemInit tests migration system initialization
