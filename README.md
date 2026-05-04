@@ -81,4 +81,3 @@ See [docs/guides/TESTING.md](docs/guides/TESTING.md) for testing procedures.
 ## License
 
 See LICENSE file for details.
-
