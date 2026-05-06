@@ -1,0 +1,51 @@
+linter-settings:
+  dogsled:
+    max-blank-lines: 2
+  errcheck:
+    check-type-assertions: true
+  exhaustive:
+    default-signifies-exhaustive: true
+  gocritic:
+    disabled-checks:
+      - unnamedResult
+  gofmt:
+    simplify: true
+  goimports:
+    local-prefixes: github.com/KooshaPari
+  gosec:
+    excludes:
+      - G104
+  misspell:
+    locale: US
+  noctx:
+    dns: true
+  nolintlint:
+    require-explanation: true
+    require-reason: true
+
+linters:
+  enable:
+    - dogsled
+    - errcheck
+    - exhaustive
+    - gocritic
+    - gofmt
+    - goimports
+    - gosec
+    - misspell
+    - noctx
+    - nolintlint
+    - staticcheck
+    - unused
+
+linters-settings:
+  errcheck:
+    exclude-functions:
+      - (*os.File).Close
+      - io.ReadAll
+  goimports:
+    local-prefixes: github.com/KooshaPari
+  staticcheck:
+    checks:
+      - all
+      - -SA1012

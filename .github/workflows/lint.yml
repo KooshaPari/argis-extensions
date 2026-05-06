@@ -1,0 +1,13 @@
+name: Lint
+on: [push, pull_request]
+jobs:
+  golangci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-go@0a12ed9e1a4ce4b1a02a5f2dd1e3a9c9e6c7f8b1
+        with:
+          go-version: 'stable'
+      - uses: golangci/golangci-lint-action@aa6339a8b9e0e1c4b5e7c4e6f8d7c3a2b1e0d9f8
+        with:
+          version: latest
