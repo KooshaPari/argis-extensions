@@ -1,4 +1,8 @@
 name: Legacy Tooling Gate (WARN Mode)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 
 on:
   push:
