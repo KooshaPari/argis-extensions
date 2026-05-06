@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"flag"
 	"fmt"
 	"log"
@@ -29,8 +30,14 @@ func main() {
 		repoOwner       = flag.String("repo-owner", "kooshapari", "GitHub repo owner for updates")
 		repoName        = flag.String("repo-name", "bifrost-extensions", "GitHub repo name for updates")
 		showVersion     = flag.Bool("version", false, "Show version and exit")
+		apiKey          = flag.String("api-key", os.Getenv("SLM_API_KEY"), "API key for authentication (required)")
 	)
 	flag.Parse()
+
+	// Require API key
+	if *apiKey == "" {
+		log.Fatal("SLM_API_KEY environment variable or -api-key flag is required")
+	}
 
 	// Show version and exit if requested
 	if *showVersion {
@@ -73,6 +80,30 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 
+	// API key auth middleware
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip auth for /health and /update/version
+			if r.URL.Path == "/health" || r.URL.Path == "/update/version" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			key := r.Header.Get("X-API-Key")
+			if key == "" {
+				key = r.Header.Get("Authorization")
+			}
+			if key == "" {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			if subtle.ConstantTimeCompare([]byte(key), []byte(*apiKey)) != 1 {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
+
 	// Create handlers
 	h := NewHandlers(llmBackend)
 
@@ -105,7 +136,7 @@ func main() {
 	// Start server
 	go func() {
 		log.Printf("SLM Server %s starting on %s (backend: %s)", Version, *addr, *backend)
-		log.Printf("Update UI available at http://localhost%s/update", *addr)
+		log.Printf("API key auth enabled. Update UI available at http://localhost%s/update", *addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server error: %v", err)
 		}
@@ -125,4 +156,3 @@ func main() {
 	}
 	log.Println("Server stopped")
 }
-
