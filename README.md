@@ -1,5 +1,7 @@
 # Bifrost Extensions
 
+[![AI Slop Inside](https://sladge.net/badge.svg)](https://sladge.net)
+
 Bifrost Extensions is a clean extension layer for the Bifrost LLM gateway, consuming upstream repositories as Go modules without modifications.
 
 ## Quick Start
@@ -81,4 +83,3 @@ See [docs/guides/TESTING.md](docs/guides/TESTING.md) for testing procedures.
 ## License
 
 See LICENSE file for details.
-
