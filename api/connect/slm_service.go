@@ -11,8 +11,8 @@ import (
 
 // RouterSLMService implements the RouterSLM Connect service
 type RouterSLMService struct {
-	logger    *slog.Logger
-	router    Router // Interface to actual routing logic
+	logger *slog.Logger
+	router Router // Interface to actual routing logic
 }
 
 // Router defines the interface for the underlying routing implementation
@@ -23,17 +23,17 @@ type Router interface {
 
 // RouteInput contains the routing request parameters
 type RouteInput struct {
-	Prompt           string
-	History          []Message
-	Capabilities     []string
-	CostPreference   float32
-	MaxLatencyMs     int32
+	Prompt             string
+	History            []Message
+	Capabilities       []string
+	CostPreference     float32
+	MaxLatencyMs       int32
 	PreferredProviders []string
 	ExcludedProviders  []string
-	AllowFallback    bool
-	SessionID        string
-	UserID           string
-	ProjectID        string
+	AllowFallback      bool
+	SessionID          string
+	UserID             string
+	ProjectID          string
 }
 
 // Message represents a conversation message
@@ -44,19 +44,19 @@ type Message struct {
 
 // RouteOutput contains the routing decision
 type RouteOutput struct {
-	ModelID       string
-	Provider      string
-	Confidence    float32
-	Reasoning     string
-	Alternatives  []ModelCandidate
-	InputCost     float32
-	OutputCost    float32
-	TotalCost     float32
-	Strategies    []string
-	VoterScores   map[string]float32
-	TaskType      string
-	Domain        string
-	LatencyMs     int32
+	ModelID      string
+	Provider     string
+	Confidence   float32
+	Reasoning    string
+	Alternatives []ModelCandidate
+	InputCost    float32
+	OutputCost   float32
+	TotalCost    float32
+	Strategies   []string
+	VoterScores  map[string]float32
+	TaskType     string
+	Domain       string
+	LatencyMs    int32
 }
 
 // ModelCandidate represents an alternative model
@@ -145,4 +145,3 @@ func (r *DefaultRouter) Route(ctx context.Context, req *RouteInput) (*RouteOutpu
 		Domain:     "general",
 	}, nil
 }
-

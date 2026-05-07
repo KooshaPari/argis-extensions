@@ -155,4 +155,3 @@ func NewRecoveryInterceptor(logger *slog.Logger) connect.UnaryInterceptorFunc {
 		}
 	}
 }
-

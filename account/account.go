@@ -107,4 +107,3 @@ func defaultProviderConfig() *schemas.ProviderConfig {
 		},
 	}
 }
-
