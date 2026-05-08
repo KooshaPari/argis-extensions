@@ -15,7 +15,7 @@ require (
 	github.com/hatchet-dev/hatchet v0.85.3
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/maximhq/bifrost/core v1.2.30
-	github.com/nats-io/nats.go v1.51.0
+	github.com/nats-io/nats.go v1.52.0
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.4
 	github.com/pgvector/pgvector-go v0.3.0
 	github.com/prometheus/client_golang v1.23.2
