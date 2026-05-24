@@ -307,3 +307,9 @@ charts/*/requirements.lock
 # Local scripts
 scripts/local/
 scripts/*.local.*
+
+# ===== Standard auto-generated hygiene ignores (do not edit manually) =====
+.env.*
+!.env.example
+.ruff_cache/
+# ===== End standard hygiene ignores =====
