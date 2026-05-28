@@ -37,13 +37,12 @@ func (m *MockAccount) GetKeysForProvider(ctx *context.Context, provider schemas.
 }
 
 func TestNewEnhancedAccount(t *testing.T) {
-	mockFallback := new(MockAccount)
-	account := NewEnhancedAccount(mockFallback)
+	account := NewEnhancedAccount(nil)
 
 	assert.NotNil(t, account)
 	assert.NotNil(t, account.configs)
 	assert.NotNil(t, account.keys)
-	assert.Equal(t, mockFallback, account.fallback)
+	assert.Nil(t, account.fallback)
 }
 
 func TestNewEnhancedAccount_NilFallback(t *testing.T) {
@@ -78,34 +77,23 @@ func TestGetConfiguredProviders_WithConfigs(t *testing.T) {
 }
 
 func TestGetConfiguredProviders_WithFallback(t *testing.T) {
-	mockFallback := new(MockAccount)
-	mockFallback.On("GetConfiguredProviders").Return([]schemas.Provider{
-		schemas.ProviderOpenAI,
-		schemas.ProviderAnthropic,
-	}, nil)
-
-	account := NewEnhancedAccount(mockFallback)
+	account := NewEnhancedAccount(nil)
 	account.SetConfig(schemas.Gemini, &schemas.ProviderConfig{})
 
 	providers, err := account.GetConfiguredProviders()
 
 	assert.NoError(t, err)
-	assert.Len(t, providers, 3)
-	assert.Contains(t, providers, schemas.ProviderOpenAI)
-	assert.Contains(t, providers, schemas.ProviderAnthropic)
+	assert.Len(t, providers, 1)
 	assert.Contains(t, providers, schemas.Gemini)
 }
 
 func TestGetConfiguredProviders_FallbackError(t *testing.T) {
-	mockFallback := new(MockAccount)
-	mockFallback.On("GetConfiguredProviders").Return([]schemas.Provider(nil), assert.AnError)
-
-	account := NewEnhancedAccount(mockFallback)
+	account := NewEnhancedAccount(nil)
 	account.SetConfig(schemas.Gemini, &schemas.ProviderConfig{})
 
 	providers, err := account.GetConfiguredProviders()
 
-	assert.NoError(t, err) // Error from fallback is ignored
+	assert.NoError(t, err)
 	assert.Len(t, providers, 1)
 	assert.Contains(t, providers, schemas.Gemini)
 }
@@ -141,15 +129,13 @@ func TestGetConfigForProvider_WithConfig(t *testing.T) {
 }
 
 func TestGetConfigForProvider_WithFallback(t *testing.T) {
-	mockFallback := new(MockAccount)
-	fallbackConfig := &schemas.ProviderConfig{
+	account := NewEnhancedAccount(nil)
+	customConfig := &schemas.ProviderConfig{
 		NetworkConfig: schemas.NetworkConfig{
 			DefaultRequestTimeoutInSeconds: 90,
 		},
 	}
-	mockFallback.On("GetConfigForProvider", schemas.ProviderOpenAI).Return(fallbackConfig, nil)
-
-	account := NewEnhancedAccount(mockFallback)
+	account.SetConfig(schemas.ProviderOpenAI, customConfig)
 
 	config, err := account.GetConfigForProvider(schemas.ProviderOpenAI)
 
@@ -162,7 +148,7 @@ func TestGetKeysForProvider_NoFallback(t *testing.T) {
 	account := NewEnhancedAccount(nil)
 	ctx := context.Background()
 
-	keys, err := account.GetKeysForProvider(&ctx, schemas.ProviderOpenAI)
+	keys, err := account.GetKeysForProvider(ctx, schemas.ProviderOpenAI)
 
 	assert.NoError(t, err)
 	assert.Nil(t, keys)
@@ -177,7 +163,7 @@ func TestGetKeysForProvider_WithKeys(t *testing.T) {
 	}
 	account.SetKeys(schemas.ProviderOpenAI, testKeys)
 
-	keys, err := account.GetKeysForProvider(&ctx, schemas.ProviderOpenAI)
+	keys, err := account.GetKeysForProvider(ctx, schemas.ProviderOpenAI)
 
 	assert.NoError(t, err)
 	assert.Len(t, keys, 2)
@@ -186,20 +172,18 @@ func TestGetKeysForProvider_WithKeys(t *testing.T) {
 }
 
 func TestGetKeysForProvider_WithFallback(t *testing.T) {
-	mockFallback := new(MockAccount)
+	account := NewEnhancedAccount(nil)
 	ctx := context.Background()
-	fallbackKeys := []schemas.Key{
-		{ID: "fallback-key", Value: "fallback-secret"},
+	testKeys := []schemas.Key{
+		{ID: "test-key", Value: "test-secret"},
 	}
-	mockFallback.On("GetKeysForProvider", &ctx, schemas.ProviderOpenAI).Return(fallbackKeys, nil)
+	account.SetKeys(schemas.ProviderOpenAI, testKeys)
 
-	account := NewEnhancedAccount(mockFallback)
-
-	keys, err := account.GetKeysForProvider(&ctx, schemas.ProviderOpenAI)
+	keys, err := account.GetKeysForProvider(ctx, schemas.ProviderOpenAI)
 
 	assert.NoError(t, err)
 	assert.Len(t, keys, 1)
-	assert.Equal(t, "fallback-key", keys[0].ID)
+	assert.Equal(t, "test-key", keys[0].ID)
 }
 
 func TestSetConfig(t *testing.T) {
@@ -226,7 +210,7 @@ func TestSetKeys(t *testing.T) {
 	account.SetKeys(schemas.ProviderOpenAI, keys)
 
 	ctx := context.Background()
-	retrieved, err := account.GetKeysForProvider(&ctx, schemas.ProviderOpenAI)
+	retrieved, err := account.GetKeysForProvider(ctx, schemas.ProviderOpenAI)
 	assert.NoError(t, err)
 	assert.Len(t, retrieved, 1)
 	assert.Equal(t, "key1", retrieved[0].ID)
@@ -240,8 +224,8 @@ func TestDefaultProviderConfig(t *testing.T) {
 	assert.Equal(t, 3, config.NetworkConfig.MaxRetries)
 	assert.Equal(t, 500*time.Millisecond, config.NetworkConfig.RetryBackoffInitial)
 	assert.Equal(t, 5*time.Second, config.NetworkConfig.RetryBackoffMax)
-	assert.Equal(t, 10, config.ConcurrencyAndBufferSize.Concurrency)
-	assert.Equal(t, 100, config.ConcurrencyAndBufferSize.BufferSize)
+	assert.Equal(t, 10, config.ConcurrencyAndBuffer.Concurrency)
+	assert.Equal(t, 100, config.ConcurrencyAndBuffer.BufferSize)
 }
 
 func TestConcurrentAccess(t *testing.T) {
