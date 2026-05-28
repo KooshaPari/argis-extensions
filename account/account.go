@@ -12,26 +12,26 @@ import (
 // EnhancedAccount implements schemas.Account with additional features
 type EnhancedAccount struct {
 	mu       sync.RWMutex
-	configs  map[schemas.ModelProvider]*schemas.ProviderConfig
-	keys     map[schemas.ModelProvider][]schemas.Key
+	configs  map[schemas.Provider]*schemas.ProviderConfig
+	keys     map[schemas.Provider][]schemas.Key
 	fallback *EnhancedAccount
 }
 
 // NewEnhancedAccount creates a new enhanced account
 func NewEnhancedAccount(fallback *EnhancedAccount) *EnhancedAccount {
 	return &EnhancedAccount{
-		configs:  make(map[schemas.ModelProvider]*schemas.ProviderConfig),
-		keys:     make(map[schemas.ModelProvider][]schemas.Key),
+		configs:  make(map[schemas.Provider]*schemas.ProviderConfig),
+		keys:     make(map[schemas.Provider][]schemas.Key),
 		fallback: fallback,
 	}
 }
 
 // GetConfiguredProviders returns all configured providers
-func (a *EnhancedAccount) GetConfiguredProviders() ([]schemas.ModelProvider, error) {
+func (a *EnhancedAccount) GetConfiguredProviders() ([]schemas.Provider, error) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
-	providers := make([]schemas.ModelProvider, 0, len(a.configs))
+	providers := make([]schemas.Provider, 0, len(a.configs))
 	for p := range a.configs {
 		providers = append(providers, p)
 	}
@@ -47,7 +47,7 @@ func (a *EnhancedAccount) GetConfiguredProviders() ([]schemas.ModelProvider, err
 }
 
 // GetConfigForProvider returns the configuration for a provider
-func (a *EnhancedAccount) GetConfigForProvider(provider schemas.ModelProvider) (*schemas.ProviderConfig, error) {
+func (a *EnhancedAccount) GetConfigForProvider(provider schemas.Provider) (*schemas.ProviderConfig, error) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
@@ -63,7 +63,7 @@ func (a *EnhancedAccount) GetConfigForProvider(provider schemas.ModelProvider) (
 }
 
 // GetKeysForProvider returns the keys for a provider
-func (a *EnhancedAccount) GetKeysForProvider(ctx context.Context, provider schemas.ModelProvider) ([]schemas.Key, error) {
+func (a *EnhancedAccount) GetKeysForProvider(ctx context.Context, provider schemas.Provider) ([]schemas.Key, error) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
@@ -79,14 +79,14 @@ func (a *EnhancedAccount) GetKeysForProvider(ctx context.Context, provider schem
 }
 
 // SetConfig sets the configuration for a provider
-func (a *EnhancedAccount) SetConfig(provider schemas.ModelProvider, config *schemas.ProviderConfig) {
+func (a *EnhancedAccount) SetConfig(provider schemas.Provider, config *schemas.ProviderConfig) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.configs[provider] = config
 }
 
 // SetKeys sets the keys for a provider
-func (a *EnhancedAccount) SetKeys(provider schemas.ModelProvider, keys []schemas.Key) {
+func (a *EnhancedAccount) SetKeys(provider schemas.Provider, keys []schemas.Key) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.keys[provider] = keys
@@ -107,4 +107,3 @@ func defaultProviderConfig() *schemas.ProviderConfig {
 		},
 	}
 }
-

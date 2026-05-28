@@ -235,6 +235,7 @@ type ErrorField struct {
 // BifrostChatResponse represents a chat response with choices
 type BifrostChatResponse struct {
 	ID      string                  `json:"id"`
+	Created int64                   `json:"created,omitempty"`
 	Choices []BifrostResponseChoice `json:"choices,omitempty"`
 	Usage   *Usage                  `json:"usage,omitempty"`
 	Model   string                  `json:"model,omitempty"`
@@ -243,12 +244,16 @@ type BifrostChatResponse struct {
 
 // BifrostResponseChoice represents a chat response choice
 type BifrostResponseChoice struct {
-	Index        int          `json:"index"`
-	Message      *ChatMessage `json:"message,omitempty"`
-	FinishReason string       `json:"finish_reason,omitempty"`
-	Text         string       `json:"text,omitempty"`
-	Delta        *ChatDelta   `json:"delta,omitempty"`
+	Index                       int                              `json:"index"`
+	Message                     *ChatMessage                     `json:"message,omitempty"`
+	ChatNonStreamResponseChoice *ChatNonStreamResponseChoice     `json:"chat_non_stream_response_choice,omitempty"`
+	FinishReason                *string                          `json:"finish_reason,omitempty"`
+	Text                        string                           `json:"text,omitempty"`
+	Delta                       *ChatDelta                       `json:"delta,omitempty"`
 }
+
+// BifrostChatChoice is an alias for BifrostResponseChoice
+type BifrostChatChoice = BifrostResponseChoice
 
 // ChatDelta represents a delta in streaming response
 type ChatDelta struct {
@@ -267,8 +272,8 @@ type ChatMessageContent struct {
 
 // ChatNonStreamResponseChoice represents a non-streaming chat response choice
 type ChatNonStreamResponseChoice struct {
-	Index   int                `json:"index"`
-	Message ChatMessageContent `json:"message"`
+	Index   int           `json:"index"`
+	Message *ChatMessage  `json:"message"`
 }
 
 // ChatToolCall represents a tool call
@@ -392,6 +397,14 @@ type Content struct {
 }
 
 // ChatMessageRole represents message roles
+type ChatMessageRole string
+
+const (
+	ChatMessageRoleSystem    ChatMessageRole = "system"
+	ChatMessageRoleUser      ChatMessageRole = "user"
+	ChatMessageRoleAssistant ChatMessageRole = "assistant"
+	ChatMessageRoleTool      ChatMessageRole = "tool"
+)
 
 // Missing provider constants
 const Mistral = "mistral"
@@ -399,14 +412,11 @@ const Bedrock = "bedrock"
 const Cohere = "cohere"
 const Voyage = "cohere"
 
-// ChatMessageRoleSystem constant
-const ChatMessageRoleSystem = "system"
-
-// ChatResponseChoice type
+// ChatResponseChoice type (non-pointer fields for compatibility)
 type ChatResponseChoice struct {
 	Index        int
-	Message      ChatMessage
-	FinishReason string
+	Message      *ChatMessage
+	FinishReason *string
 }
 
 // Logger interface
@@ -426,9 +436,65 @@ func NewBifrost(cfg *BifrostConfig) *Bifrost {
 	return &Bifrost{config: cfg}
 }
 
+// BifrostChatRequest for chat completions
+type BifrostChatRequest struct {
+	Model            string                `json:"model"`
+	Input            []BifrostChatMessage  `json:"input,omitempty"`
+	Messages         []BifrostChatMessage  `json:"messages,omitempty"`
+	Params           *BifrostChatParams    `json:"params,omitempty"`
+	Temperature      *float64              `json:"temperature,omitempty"`
+	MaxCompletionTokens *int                `json:"max_completion_tokens,omitempty"`
+	MaxTokens        *int                  `json:"max_tokens,omitempty"`
+	Stream           bool                  `json:"stream,omitempty"`
+	TopP             *float64              `json:"top_p,omitempty"`
+	FrequencyPenalty *float64              `json:"frequency_penalty,omitempty"`
+	PresencePenalty  *float64              `json:"presence_penalty,omitempty"`
+}
+
+// BifrostChatMessage represents a chat message
+type BifrostChatMessage struct {
+	Role    string                `json:"role"`
+	Content *BifrostChatContent   `json:"content,omitempty"`
+}
+
+// BifrostChatContent represents chat message content
+type BifrostChatContent struct {
+	ContentStr *string `json:"content_str,omitempty"`
+	Text       string  `json:"text,omitempty"`
+}
+
+// BifrostChatParams represents chat parameters
+type BifrostChatParams struct {
+	MaxCompletionTokens *int     `json:"max_completion_tokens,omitempty"`
+	MaxTokens           *int     `json:"max_tokens,omitempty"`
+	Temperature         *float64 `json:"temperature,omitempty"`
+	TopP                *float64 `json:"top_p,omitempty"`
+}
+
+// BifrostStreamChunk for streaming responses
+type BifrostStreamChunk struct {
+	BifrostChatResponse *BifrostChatResponse `json:"bifrost_chat_response,omitempty"`
+	Delta               *ChatDelta           `json:"delta,omitempty"`
+}
+
+// BifrostTextCompletionRequest for text completions
+type BifrostTextCompletionRequest struct {
+	Model       string    `json:"model"`
+	Input       string    `json:"input"`
+	MaxTokens   *int      `json:"max_tokens,omitempty"`
+	Temperature *float64  `json:"temperature,omitempty"`
+	TopP        *float64  `json:"top_p,omitempty"`
+}
+
+// BifrostTextCompletionResponse for text completion responses
+type BifrostTextCompletionResponse struct {
+	ID      string `json:"id"`
+	Created int64  `json:"created"`
+}
+
 // BifrostConfig type
 type BifrostConfig struct {
-	Account         *Account
+	Account         *EnhancedAccount
 	Plugins         []Plugin
 	LogLevel        string
 	Logger          Logger
@@ -454,29 +520,6 @@ func (r *BifrostRequest) GetParams() map[string]interface{} {
 
 func (r *BifrostRequest) SetParams(params map[string]interface{}) {
 	r.Params = params
-}
-
-// BifrostChatRequest type
-type BifrostChatRequest struct {
-	Model            string                `json:"model"`
-	Messages         []BifrostChatMessage  `json:"messages"`
-	Temperature      *float64              `json:"temperature,omitempty"`
-	MaxTokens        *int                  `json:"max_tokens,omitempty"`
-	Stream           bool                  `json:"stream,omitempty"`
-	TopP             *float64              `json:"top_p,omitempty"`
-	FrequencyPenalty *float64              `json:"frequency_penalty,omitempty"`
-	PresencePenalty  *float64              `json:"presence_penalty,omitempty"`
-}
-
-// BifrostChatMessage type
-type BifrostChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// BifrostChatContent type
-type BifrostChatContent struct {
-	Text string `json:"text"`
 }
 
 // TextCompletionRequest alias
@@ -545,18 +588,48 @@ type BifrostStream struct {
 }
 
 // Add missing methods on Bifrost type
-func (b *Bifrost) ChatCompletionRequest(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
-	return &ChatResponse{}, nil
+func (b *Bifrost) ChatCompletionRequest(ctx context.Context, req *BifrostChatRequest) (*BifrostChatResponse, *BifrostError) {
+	return &BifrostChatResponse{}, nil
 }
 
-func (b *Bifrost) ChatCompletionStreamRequest(ctx context.Context, req *ChatRequest) (*BifrostStreamResponse, error) {
-	return &BifrostStreamResponse{}, nil
+func (b *Bifrost) ChatCompletionStreamRequest(ctx context.Context, req *BifrostChatRequest) (<-chan BifrostStreamChunk, *BifrostError) {
+	ch := make(chan BifrostStreamChunk)
+	close(ch)
+	return ch, nil
 }
 
-func (b *Bifrost) TextCompletionRequest(ctx context.Context, req *CompletionRequest) (*CompletionResponse, error) {
-	return &CompletionResponse{}, nil
+func (b *Bifrost) TextCompletionRequest(ctx context.Context, req *BifrostTextCompletionRequest) (*BifrostTextCompletionResponse, *BifrostError) {
+	return &BifrostTextCompletionResponse{}, nil
 }
 
-func (b *Bifrost) ListAllModels(ctx context.Context) ([]*Model, error) {
-	return []*Model{}, nil
+func (b *Bifrost) ListAllModels(ctx context.Context, account Account) ([]Model, error) {
+	return []Model{}, nil
+}
+
+// Shutdown gracefully shuts down the Bifrost instance
+func (b *Bifrost) Shutdown() {}
+
+// LogLevel constants
+const (
+	LogLevelDebug = "debug"
+	LogLevelInfo  = "info"
+	LogLevelWarn  = "warn"
+	LogLevelError = "error"
+)
+
+// NewDefaultLogger creates a default logger
+func NewDefaultLogger(level ...string) Logger {
+	return &defaultLogger{}
+}
+
+type defaultLogger struct{}
+
+func (d *defaultLogger) Debug(msg string, args ...interface{})  {}
+func (d *defaultLogger) Info(msg string, args ...interface{})   {}
+func (d *defaultLogger) Warn(msg string, args ...interface{})   {}
+func (d *defaultLogger) Error(msg string, args ...interface{})  {}
+
+// Init initializes a Bifrost instance
+func Init(ctx context.Context, cfg BifrostConfig) (*Bifrost, error) {
+	return NewBifrost(&cfg), nil
 }

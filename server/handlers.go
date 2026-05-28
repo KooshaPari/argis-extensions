@@ -127,54 +127,6 @@ func (s *Server) writeSSEChatResponse(w http.ResponseWriter, flusher http.Flushe
 	}
 }
 
-// convertToChatRequest converts OpenAI request to Bifrost chat request
-func (s *Server) convertToChatRequest(req *ChatCompletionRequest) *schemas.ChatRequest {
-	messages := make([]schemas.ChatMessage, 0, len(req.Messages))
-	for _, msg := range req.Messages {
-		messages = append(messages, schemas.ChatMessage{
-			Role:    msg.Role,
-			Content: msg.Content,
-		})
-	}
-
-	return &schemas.ChatRequest{
-		Messages:  messages,
-		Model:    req.Model,
-		MaxTokens: 0,
-	}
-}
-
-// convertFromChatResponse converts Bifrost response to OpenAI response
-func (s *Server) convertFromChatResponse(resp *schemas.ChatResponse, model string) *ChatCompletionResponse {
-	if resp == nil {
-		return nil
-	}
-
-	choices := make([]ChatCompletionChoice, 0, len(resp.Choices))
-	for _, choice := range resp.Choices {
-		finishReason := choice.FinishReason
-		c := ChatCompletionChoice{
-			Index:        choice.Index,
-			FinishReason: &finishReason,
-		}
-
-		c.Message = &ChatMessage{
-			Role:    choice.Message.Role,
-			Content: choice.Message.Content,
-		}
-
-		choices = append(choices, c)
-	}
-
-	return &ChatCompletionResponse{
-		ID:      resp.ID,
-		Object:  "chat.completion",
-		Created: int64(resp.Created),
-		Model:   model,
-		Choices: choices,
-	}
-}
-
 // Start starts the HTTP server
 func (s *Server) Start() error {
 	s.logger.Info("starting HTTP server", "addr", s.httpServer.Addr)

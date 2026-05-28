@@ -9,9 +9,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/maximhq/bifrost/core/schemas"
+	bifrost "github.com/maximhq/bifrost/core/schemas"
 
 	"github.com/kooshapari/bifrost-extensions/plugins/intelligentrouter"
 	"github.com/kooshapari/bifrost-extensions/plugins/learning"
@@ -33,53 +33,6 @@ func main() {
 
 	// Create enhanced account with configured providers
 	acct := schemas.NewEnhancedAccount(nil)
-
-	// Add standard providers from environment
-	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
-		acct.SetKeys(schemas.OpenAI, []schemas.Key{{
-			ID:     "openai-default",
-			Value:  key,
-			Weight: 1.0,
-		}})
-		acct.SetConfig(schemas.OpenAI, &schemas.ProviderConfig{
-			NetworkConfig: schemas.NetworkConfig{
-				DefaultRequestTimeoutInSeconds: 60,
-				MaxRetries:                     3,
-				RetryBackoffInitial:            500 * time.Millisecond,
-				RetryBackoffMax:                5 * time.Second,
-			},
-		})
-	}
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		acct.SetKeys(schemas.Anthropic, []schemas.Key{{
-			ID:     "anthropic-default",
-			Value:  key,
-			Weight: 1.0,
-		}})
-		acct.SetConfig(schemas.Anthropic, &schemas.ProviderConfig{
-			NetworkConfig: schemas.NetworkConfig{
-				DefaultRequestTimeoutInSeconds: 60,
-				MaxRetries:                     3,
-				RetryBackoffInitial:            500 * time.Millisecond,
-				RetryBackoffMax:                5 * time.Second,
-			},
-		})
-	}
-	if key := os.Getenv("GOOGLE_API_KEY"); key != "" {
-		acct.SetKeys(schemas.Gemini, []schemas.Key{{
-			ID:     "gemini-default",
-			Value:  key,
-			Weight: 1.0,
-		}})
-		acct.SetConfig(schemas.Gemini, &schemas.ProviderConfig{
-			NetworkConfig: schemas.NetworkConfig{
-				DefaultRequestTimeoutInSeconds: 60,
-				MaxRetries:                     3,
-				RetryBackoffInitial:            500 * time.Millisecond,
-				RetryBackoffMax:                5 * time.Second,
-			},
-		})
-	}
 
 	// Create plugins
 	routerPlugin := intelligentrouter.New(intelligentrouter.DefaultConfig())

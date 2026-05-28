@@ -162,4 +162,3 @@ func (e *DefaultEmbedder) EmbedBatch(ctx context.Context, texts []string, model 
 	}
 	return embeddings, totalTokens, nil
 }
-

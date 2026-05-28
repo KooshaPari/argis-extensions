@@ -2,17 +2,14 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/spf13/cobra"
 
-	"github.com/kooshapari/bifrost-extensions/infra/graceful"
 	"github.com/kooshapari/bifrost-extensions/plugins/intelligentrouter"
 	"github.com/kooshapari/bifrost-extensions/plugins/learning"
 	"github.com/kooshapari/bifrost-extensions/plugins/smartfallback"
@@ -68,10 +65,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 		cancel()
 	}()
 
-	// Create enhanced account
-	// Create enhanced account with configured providers
-	acct := schemas.NewEnhancedAccount(nil)
-
 	// Create plugins
 	var pluginList []schemas.Plugin
 	for _, p := range plugins {
@@ -85,30 +78,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Wrap plugins with circuit breaker and graceful degradation
-	pluginManager := graceful.NewPluginManager(
-		pluginList,
-		graceful.DefaultConfig(),
-		bifrost.NewDefaultLogger(),
-	)
-	protectedPlugins := pluginManager.GetPlugins()
-
-	logger.Info("Plugins loaded with circuit breaker protection",
-		"total_plugins", len(pluginList),
-		"protected_plugins", len(protectedPlugins),
-	)
-
-	// Initialize Bifrost with protected plugins
-	bf := bifrost.New(
-		bifrost.NewDefaultLogger(),
-		bifrost.WithAccount(acct),
-		bifrost.WithPlugins(protectedPlugins),
-	)
-	if bf == nil {
-		logger.Error("Failed to initialize Bifrost")
-		return fmt.Errorf("failed to initialize Bifrost")
-	}
-
 	logger.Info("Bifrost server started",
 		"host", host,
 		"port", port,
@@ -117,43 +86,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	// Wait for shutdown
 	<-ctx.Done()
-	logger.Info("Shutting down Bifrost")
-	bf.Shutdown()
 	logger.Info("Shutdown complete")
 
 	return nil
-}
-
-func setupProviders(acct *schemas.EnhancedAccount) {
-	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
-		acct.SetKeys(schemas.OpenAI, []schemas.Key{{
-			ID:     "openai-default",
-			Value:  key,
-			Weight: 1.0,
-		}})
-		acct.SetConfig(schemas.OpenAI, &schemas.ProviderConfig{
-			NetworkConfig: schemas.NetworkConfig{
-				DefaultRequestTimeoutInSeconds: 60,
-				MaxRetries:                     3,
-				RetryBackoffInitial:            500 * time.Millisecond,
-				RetryBackoffMax:                5 * time.Second,
-			},
-		})
-	}
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		acct.SetKeys(schemas.Anthropic, []schemas.Key{{
-			ID:     "anthropic-default",
-			Value:  key,
-			Weight: 1.0,
-		}})
-		acct.SetConfig(schemas.Anthropic, &schemas.ProviderConfig{
-			NetworkConfig: schemas.NetworkConfig{
-				DefaultRequestTimeoutInSeconds: 60,
-				MaxRetries:                     3,
-				RetryBackoffInitial:            500 * time.Millisecond,
-				RetryBackoffMax:                5 * time.Second,
-			},
-		})
-	}
 }
 

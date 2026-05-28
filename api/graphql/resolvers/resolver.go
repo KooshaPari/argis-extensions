@@ -191,7 +191,12 @@ func (r *mutationResolver) DeleteModel(ctx context.Context, id string) (bool, er
 }
 
 // Add missing methods to subscriptionResolver
-func (r *subscriptionResolver) HealthUpdates(ctx context.Context) (<-chan *model.ProviderHealthEvent, error) {
+func (r *subscriptionResolver) HealthUpdates(ctx context.Context, providerIds []string) (<-chan *model.ProviderHealthEvent, error) {
 	ch := make(chan *model.ProviderHealthEvent)
+	return ch, nil
+}
+
+func (r *subscriptionResolver) RoutingUpdates(ctx context.Context, sessionID *string) (<-chan *model.RoutingEvent, error) {
+	ch := make(chan *model.RoutingEvent)
 	return ch, nil
 }

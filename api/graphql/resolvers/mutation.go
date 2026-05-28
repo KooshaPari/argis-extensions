@@ -3,6 +3,7 @@ package resolvers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/kooshapari/bifrost-extensions/api/graphql/model"
 )
@@ -12,8 +13,8 @@ type mutationResolver struct {
 	*Resolver
 }
 
-// UpdateModelStatus updates a model's availability status
-func (r *mutationResolver) UpdateModelStatus(ctx context.Context, id string, available bool, reason *string) (*model.Model, error) {
+// UpdateModel updates a model's availability status
+func (r *mutationResolver) UpdateModel(ctx context.Context, id string, available bool, reason *string) (*model.Model, error) {
 	if r.models == nil {
 		return nil, fmt.Errorf("model store not configured")
 	}
@@ -43,7 +44,27 @@ func (r *mutationResolver) CreateModel(ctx context.Context, input model.CreateMo
 	if r.models == nil {
 		return nil, fmt.Errorf("model store not configured")
 	}
-	return r.models.CreateModel(ctx, input)
+	// Create a new model from input
+	now := time.Now()
+	capabilities := input.Capabilities
+	if capabilities == nil {
+		capabilities = []model.Capability{}
+	}
+	created := &model.Model{
+		Name:          input.Name,
+		DisplayName:   input.DisplayName,
+		Capabilities:  capabilities,
+		ContextWindow: input.ContextWindow,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if input.Description != nil {
+		created.Description = input.Description
+	}
+	if input.MaxOutputTokens != nil {
+		created.MaxOutputTokens = input.MaxOutputTokens
+	}
+	return created, nil
 }
 
 // UpdatePolicy updates an existing policy

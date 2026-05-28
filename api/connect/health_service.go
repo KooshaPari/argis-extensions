@@ -12,11 +12,11 @@ import (
 
 // HealthService implements the Health Connect service
 type HealthService struct {
-	logger      *slog.Logger
-	mu          sync.RWMutex
-	services    map[string]*ServiceHealth
-	providers   map[string]*ProviderHealth
-	startTime   time.Time
+	logger    *slog.Logger
+	mu        sync.RWMutex
+	services  map[string]*ServiceHealth
+	providers map[string]*ProviderHealth
+	startTime time.Time
 }
 
 // ServingStatus represents health status
@@ -50,13 +50,13 @@ type ComponentHealth struct {
 
 // ProviderHealth tracks an LLM provider's health
 type ProviderHealth struct {
-	Name           string
-	Status         ProviderStatus
-	Models         []ModelHealth
-	RateLimit      *RateLimitInfo
-	LastCheck      time.Time
-	AvgLatencyMs   float64
-	ErrorRate      float64
+	Name         string
+	Status       ProviderStatus
+	Models       []ModelHealth
+	RateLimit    *RateLimitInfo
+	LastCheck    time.Time
+	AvgLatencyMs float64
+	ErrorRate    float64
 }
 
 // ProviderStatus represents provider health status
@@ -209,4 +209,3 @@ func (s *HealthService) UpdateProviderHealth(name string, status ProviderStatus,
 		prov.LastCheck = time.Now()
 	}
 }
-

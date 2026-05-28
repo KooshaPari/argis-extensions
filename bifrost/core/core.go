@@ -26,6 +26,7 @@ type (
 	Plugin                     = schemas.Plugin
 	PluginShortCircuit         = schemas.PluginShortCircuit
 	ChatRequest                = schemas.ChatRequest
+	ChatResponse               = schemas.ChatResponse
 	ChatMessageRole            = schemas.ChatMessageRole
 	LLMUsage                   = schemas.LLMUsage
 	BifrostEmbeddingRequest    = schemas.BifrostEmbeddingRequest
@@ -33,6 +34,14 @@ type (
 	EmbeddingStruct            = schemas.EmbeddingStruct
 	ResponseExtraFields        = schemas.ResponseExtraFields
 	Content                    = schemas.Content
+	Bifrost                    = schemas.Bifrost
+	BifrostConfig              = schemas.BifrostConfig
+	BifrostChatRequest         = schemas.BifrostChatRequest
+	BifrostChatMessage         = schemas.BifrostChatMessage
+	BifrostChatContent         = schemas.BifrostChatContent
+	BifrostStreamResponse      = schemas.BifrostStreamResponse
+	Model                      = schemas.Model
+	TextCompletionRequest      = schemas.TextCompletionRequest
 )
 
 // Constants
@@ -41,9 +50,16 @@ const (
 	ProviderAnthropic = schemas.ProviderAnthropic
 	ProviderGemini    = schemas.ProviderGemini
 	ProviderCustom    = schemas.ProviderCustom
+	LogLevelDebug     = schemas.LogLevelDebug
+	LogLevelInfo      = schemas.LogLevelInfo
+	LogLevelWarn      = schemas.LogLevelWarn
+	LogLevelError     = schemas.LogLevelError
 )
 
 // Functions
 var (
 	NewEnhancedAccount = schemas.NewEnhancedAccount
+	NewBifrost         = schemas.NewBifrost
+	NewDefaultLogger   = schemas.NewDefaultLogger
+	Init               = schemas.Init
 )

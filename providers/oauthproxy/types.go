@@ -87,8 +87,8 @@ func (p *Provider) convertToBifrostResponse(resp *OpenAIResponse) *schemas.Bifro
 	for i, choice := range resp.Choices {
 		choices[i] = schemas.ChatResponseChoice{
 			Index:        choice.Index,
-			FinishReason: choice.FinishReason,
-			Message: schemas.ChatMessage{
+			FinishReason: &choice.FinishReason,
+			Message: &schemas.ChatMessage{
 				Role:    choice.Message.Role,
 				Content: choice.Message.Content,
 			},

@@ -158,8 +158,8 @@ func (p *Provider) ChatCompletion(
 			Choices: []schemas.ChatResponseChoice{
 				{
 					Index:        0,
-					FinishReason: finishReason,
-					Message: schemas.ChatMessage{
+					FinishReason: &finishReason,
+					Message: &schemas.ChatMessage{
 						Role:    "assistant",
 						Content: response,
 					},

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/maximhq/bifrost/core/schemas"
-	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -165,10 +164,8 @@ func TestHandleChatCompletions_NonStreaming(t *testing.T) {
 				Index: 0,
 				ChatNonStreamResponseChoice: &schemas.ChatNonStreamResponseChoice{
 					Message: &schemas.ChatMessage{
-						Role: schemas.ChatMessageRoleAssistant,
-						Content: &schemas.ChatMessageContent{
-							ContentStr: stringPtr("Hello! How can I help?"),
-						},
+						Role: string(schemas.ChatMessageRoleAssistant),
+						Content: "Hello! How can I help?",
 					},
 				},
 				FinishReason: stringPtr("stop"),
@@ -220,10 +217,8 @@ func TestHandleChatCompletions_Streaming(t *testing.T) {
 					Index: 0,
 					ChatNonStreamResponseChoice: &schemas.ChatNonStreamResponseChoice{
 						Message: &schemas.ChatMessage{
-							Role: schemas.ChatMessageRoleAssistant,
-							Content: &schemas.ChatMessageContent{
-								ContentStr: stringPtr("Hello"),
-							},
+							Role: string(schemas.ChatMessageRoleAssistant),
+							Content: "Hello",
 						},
 					},
 				},
@@ -231,6 +226,7 @@ func TestHandleChatCompletions_Streaming(t *testing.T) {
 		},
 	}
 	close(streamChan)
+	mockBifrost.On("ChatCompletionStreamRequest", mock.Anything, mock.Anything).Return((<-chan schemas.BifrostStreamChunk)(streamChan), (*schemas.BifrostError)(nil))
 
 	mockBifrost.On("ChatCompletionStreamRequest", mock.Anything, mock.Anything).Return(streamChan, (*schemas.BifrostError)(nil))
 
@@ -274,9 +270,7 @@ func TestHandleChatCompletions_BifrostError(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	bifrostErr := &schemas.BifrostError{
-		Error: &schemas.BifrostErrorDetail{
-			Message: "Model not found",
-		},
+		Message:    "Model not found",
 		StatusCode: intPtr(http.StatusNotFound),
 	}
 
@@ -434,13 +428,12 @@ func TestConvertToBifrostChatRequest(t *testing.T) {
 	bifrostReq := server.convertToBifrostChatRequest(req)
 
 	assert.Equal(t, "gpt-4", bifrostReq.Model)
-	assert.Len(t, bifrostReq.Input, 2)
-	assert.Equal(t, schemas.ChatMessageRoleUser, bifrostReq.Input[0].Role)
-	assert.Equal(t, "Hello", *bifrostReq.Input[0].Content.ContentStr)
-	assert.NotNil(t, bifrostReq.Params)
-	assert.Equal(t, 100, *bifrostReq.Params.MaxCompletionTokens)
-	assert.Equal(t, 0.7, *bifrostReq.Params.Temperature)
-	assert.Equal(t, 0.9, *bifrostReq.Params.TopP)
+	assert.Len(t, bifrostReq.Messages, 2)
+	assert.Equal(t, "user", bifrostReq.Messages[0].Role)
+	assert.Equal(t, "Hello", *bifrostReq.Messages[0].Content.ContentStr)
+	assert.Equal(t, 100, *bifrostReq.MaxTokens)
+	assert.Equal(t, 0.7, *bifrostReq.Temperature)
+	assert.Equal(t, 0.9, *bifrostReq.TopP)
 }
 
 func TestConvertToOpenAIChatResponse(t *testing.T) {
@@ -457,10 +450,8 @@ func TestConvertToOpenAIChatResponse(t *testing.T) {
 				Index: 0,
 				ChatNonStreamResponseChoice: &schemas.ChatNonStreamResponseChoice{
 					Message: &schemas.ChatMessage{
-						Role: schemas.ChatMessageRoleAssistant,
-						Content: &schemas.ChatMessageContent{
-							ContentStr: stringPtr("Hello!"),
-						},
+						Role: string(schemas.ChatMessageRoleAssistant),
+						Content: "Hello!",
 					},
 				},
 				FinishReason: stringPtr("stop"),
@@ -483,12 +474,14 @@ func TestShutdown(t *testing.T) {
 	cfg := newTestConfig()
 	mockBifrost := new(MockBifrost)
 	mockLogger := new(MockLogger)
+	mockLogger.On("Info", mock.Anything, mock.Anything).Return()
 	server := New(cfg, mockBifrost, mockLogger)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	// Server not started, so shutdown should work
+	mockLogger.On("Info", mock.Anything, mock.Anything).Return()
 	err := server.Shutdown(ctx)
 	assert.NoError(t, err)
 }

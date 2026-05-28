@@ -58,7 +58,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Promote to staging
-        uses: KooshaPari/phenotypeActions/promote@main
+        uses: KooshaPari/phenotypeActions/promote@48772d7560c964fff01a209742429f24283e96cf
         with:
           version: $123needs.release.outputs.version125
           channel: beta
