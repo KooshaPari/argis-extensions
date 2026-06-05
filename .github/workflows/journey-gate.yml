@@ -59,7 +59,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4@{"message":"Not Found","documentation_url":"https://docs.github.com/rest/commits/commits#get-a-commit","status":"404"}
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10@{"message":"Not Found","documentation_url":"https://docs.github.com/rest/commits/commits#get-a-commit","status":"404"}
 
       # ---------------------------------------------------------------------
       # 1. Install runtime dependencies
