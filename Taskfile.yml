@@ -1,121 +1,69 @@
-version: "3"
-
-vars:
-  BUILD_ARTIFACTS: bin dist coverage.out coverage.html .coverage
-  GO_ROOT_BUILD_TARGETS: ./cmd/bifrost ./cmd/bifrost-enhanced
-  GO_BUILD_FLAGS: ./...
-  GO_TEST_FLAGS: ./...
-  GO_CLEAN_FLAGS: -testcache -fuzzcache
-  GOLANGCI_LINT_ARGS: run --timeout 5m ./...
-  PYTEST_ARGS:
-  RUFF_CHECK_ARGS: .
-  GO_MODULES:
-    sh: find . -name go.mod -not -path "./.git/*" -exec dirname {} \; | sort | tr "\n" " "
-  PYTHON_PROJECTS:
-    sh: find . -name pyproject.toml -not -path "./.git/*" -exec dirname {} \; | sort | tr "\n" " "
+version: '3'
 
 tasks:
-  default:
-    desc: Build all detected projects
-    cmds:
-      - task: build
-
-  detect:
-    desc: Print detected project languages and roots
-    cmds:
-      - |
-        set -e
-        detected=false
-        if [ -n "{{.GO_MODULES}}" ]; then
-          detected=true
-          echo "go modules: {{.GO_MODULES}}"
-        fi
-        if [ -n "{{.PYTHON_PROJECTS}}" ]; then
-          detected=true
-          echo "python projects: {{.PYTHON_PROJECTS}}"
-        fi
-        if [ "${detected}" = false ]; then
-          echo "language: unknown"
-        fi
-
   build:
-    desc: Build all detected projects
+    desc: "Build the Go project"
     cmds:
-      - |
-        set -e
-        for module in {{.GO_MODULES}}; do
-          echo "Building ${module}"
-          if [ "${module}" = "." ]; then
-            mkdir -p bin
-            for target in {{.GO_ROOT_BUILD_TARGETS}}; do
-              name="$(basename "${target}")"
-              go build -o "bin/${name}" "${target}"
-            done
-          else
-            (cd "${module}" && go build {{.GO_BUILD_FLAGS}})
-          fi
-        done
-        for project in {{.PYTHON_PROJECTS}}; do
-          echo "Building ${project}"
-          if command -v uv >/dev/null 2>&1; then
-            (cd "${project}" && uv build)
-          else
-            (cd "${project}" && python -m build)
-          fi
-        done
+      - go build -v ./...
 
   test:
-    desc: Run tests for all detected projects
+    desc: "Run all tests"
     cmds:
-      - |
-        set -e
-        for module in {{.GO_MODULES}}; do
-          echo "Testing ${module}"
-          (cd "${module}" && go test {{.GO_TEST_FLAGS}})
-        done
-        for project in {{.PYTHON_PROJECTS}}; do
-          echo "Testing ${project}"
-          if command -v uv >/dev/null 2>&1; then
-            (cd "${project}" && uv run pytest {{.PYTEST_ARGS}})
-          else
-            (cd "${project}" && python -m pytest {{.PYTEST_ARGS}})
-          fi
-        done
+      - go test -v -race ./...
+
+  test-cover:
+    desc: "Run tests with coverage"
+    cmds:
+      - go test -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
 
   lint:
-    desc: Run lint checks for all detected projects
+    desc: "Run linter"
     cmds:
-      - |
-        set -e
-        for module in {{.GO_MODULES}}; do
-          echo "Linting ${module}"
-          if command -v golangci-lint >/dev/null 2>&1; then
-            (cd "${module}" && golangci-lint {{.GOLANGCI_LINT_ARGS}})
-          else
-            (cd "${module}" && go vet {{.GO_TEST_FLAGS}})
-          fi
-        done
-        for project in {{.PYTHON_PROJECTS}}; do
-          echo "Linting ${project}"
-          if command -v uv >/dev/null 2>&1; then
-            (cd "${project}" && uv run ruff check {{.RUFF_CHECK_ARGS}})
-          else
-            (cd "${project}" && python -m ruff check {{.RUFF_CHECK_ARGS}})
-          fi
-        done
+      - golangci-lint run ./...
+
+  format:
+    desc: "Format code"
+    cmds:
+      - go fmt ./...
+
+  vet:
+    desc: "Run go vet"
+    cmds:
+      - go vet ./...
 
   clean:
-    desc: Clean local build artifacts and test caches
+    desc: "Clean build artifacts"
     cmds:
-      - |
-        set -e
-        for module in {{.GO_MODULES}}; do
-          echo "Cleaning ${module}"
-          (cd "${module}" && go clean {{.GO_CLEAN_FLAGS}})
-        done
-        for project in {{.PYTHON_PROJECTS}}; do
-          echo "Cleaning ${project}"
-          rm -rf "${project}/dist" "${project}/build" "${project}"/*.egg-info
-          find "${project}" -type d \( -name __pycache__ -o -name .pytest_cache -o -name .ruff_cache \) -prune -exec rm -rf {} +
-        done
-        rm -rf {{.BUILD_ARTIFACTS}}
+      - rm -rf bin/
+      - rm -f coverage.out coverage.html
+
+  deps:
+    desc: "Download and verify dependencies"
+    cmds:
+      - go mod download
+      - go mod verify
+
+  security:
+    desc: "Run security audit"
+    cmds:
+      - go run golang.org/x/vulncheck/cmd/govulncheck@latest ./...
+
+  ci:
+    desc: "Run full CI pipeline"
+    cmds:
+      - task: format
+      - task: vet
+      - task: lint
+      - task: test
+
+  # CLI specific targets
+  cli-build:
+    desc: "Build CLI binary"
+    cmds:
+      - go build -o bin/bifrost ./cmd/bifrost
+
+  cli-install:
+    desc: "Install CLI globally"
+    cmds:
+      - go install ./cmd/bifrost

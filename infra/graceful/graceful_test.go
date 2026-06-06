@@ -24,17 +24,19 @@ func (m *mockPlugin) GetName() string {
 	return m.name
 }
 
+func (m *mockPlugin) Config() map[string]interface{} {
+	return map[string]interface{}{"name": m.name}
+}
+
 func (m *mockPlugin) TransportInterceptor(
-	ctx *context.Context,
-	url string,
-	headers map[string]string,
-	body map[string]any,
-) (map[string]string, map[string]any, error) {
-	return headers, body, m.transportErr
+	ctx context.Context,
+	req *schemas.BifrostRequest,
+) (*schemas.BifrostRequest, *schemas.PluginShortCircuit, error) {
+	return req, nil, m.transportErr
 }
 
 func (m *mockPlugin) PreHook(
-	ctx *context.Context,
+	ctx context.Context,
 	req *schemas.BifrostRequest,
 ) (*schemas.BifrostRequest, *schemas.PluginShortCircuit, error) {
 	if m.shouldShortCircuit {
@@ -44,11 +46,11 @@ func (m *mockPlugin) PreHook(
 }
 
 func (m *mockPlugin) PostHook(
-	ctx *context.Context,
+	ctx context.Context,
 	resp *schemas.BifrostResponse,
-	err *schemas.BifrostError,
+	err error,
 ) (*schemas.BifrostResponse, *schemas.BifrostError, error) {
-	return resp, err, m.postHookErr
+	return resp, nil, m.postHookErr
 }
 
 func (m *mockPlugin) Cleanup() error {
@@ -157,7 +159,7 @@ func TestPluginManager_ExecutePostHooks_Success(t *testing.T) {
 	ctx := context.Background()
 	resp := &schemas.BifrostResponse{}
 
-	resultResp, _, err := manager.ExecutePostHooks(ctx, resp, nil)
+	resultResp, _, err := manager.ExecutePostHooks(ctx, resp)
 
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
@@ -181,7 +183,7 @@ func TestPluginManager_ExecutePostHooks_WithFailure(t *testing.T) {
 	ctx := context.Background()
 	resp := &schemas.BifrostResponse{}
 
-	resultResp, _, _ := manager.ExecutePostHooks(ctx, resp, nil)
+	resultResp, _, _ := manager.ExecutePostHooks(ctx, resp)
 
 	// Should continue despite error (graceful degradation)
 	if resultResp == nil {

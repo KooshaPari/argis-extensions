@@ -1,20 +1,19 @@
+# Pull Request Description
+
 ## Summary
+<!-- What does this PR do? -->
 
-<!-- What does this PR do, in 1-3 sentences -->
-
-## Changes
-
-<!-- Bullet list of key changes -->
-- 
+## Type of Change
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Breaking change
+- [ ] Documentation update
 
 ## Testing
+<!-- How was this tested? -->
 
-<!-- How was this verified? -->
-- [ ] Local lint passes
-- [ ] Local tests pass
-- [ ] Manual smoke test (if applicable)
-
-## Related
-
-<!-- Issues/PRs/specs this addresses -->
-Closes #
+## Checklist
+- [ ] Code follows project style guidelines
+- [ ] Self-review completed
+- [ ] Tests added/updated
+- [ ] Documentation updated

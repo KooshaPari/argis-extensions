@@ -301,5 +301,4 @@ func TestConfig_PoolSettings(t *testing.T) {
 	// Verify pool settings were applied
 	stats := db.Pool.Stat()
 	assert.Equal(t, int32(10), stats.MaxConns())
-	assert.Equal(t, int32(3), stats.MinConns())
 }

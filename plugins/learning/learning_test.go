@@ -14,8 +14,8 @@ func TestNewPlugin(t *testing.T) {
 	if p == nil {
 		t.Fatal("New returned nil")
 	}
-	if p.GetName() != "learning" {
-		t.Errorf("expected name 'learning', got %s", p.GetName())
+	if p.GetName() != "learning-system" {
+		t.Errorf("expected name 'learning-system', got %s", p.GetName())
 	}
 }
 
@@ -24,20 +24,19 @@ func TestPluginPreHook(t *testing.T) {
 	p := New(cfg)
 
 	ctx := context.Background()
-	content := "test message"
 	req := &schemas.BifrostRequest{
-		ChatRequest: &schemas.BifrostChatRequest{
+		ChatRequest: &schemas.ChatRequest{
 			Model: "gpt-4",
-			Input: []schemas.ChatMessage{
+			Messages: []schemas.Message{
 				{
-					Role:    schemas.ChatMessageRoleUser,
-					Content: &schemas.ChatMessageContent{ContentStr: &content},
+					Role:    "user",
+					Content: "test message",
 				},
 			},
 		},
 	}
 
-	result, shortCircuit, err := p.PreHook(&ctx, req)
+	result, shortCircuit, err := p.PreHook(ctx, req)
 	if err != nil {
 		t.Fatalf("PreHook returned error: %v", err)
 	}
@@ -54,25 +53,22 @@ func TestPluginPostHook(t *testing.T) {
 	p := New(cfg)
 
 	ctx := context.Background()
-	content := "response content"
 	resp := &schemas.BifrostResponse{
-		ChatResponse: &schemas.BifrostChatResponse{
+		ChatResponse: &schemas.ChatResponse{
 			ID: "test-id",
-			Choices: []schemas.BifrostResponseChoice{
+			Choices: []schemas.ChatResponseChoice{
 				{
 					Index: 0,
-					ChatNonStreamResponseChoice: &schemas.ChatNonStreamResponseChoice{
-						Message: &schemas.ChatMessage{
-							Role:    schemas.ChatMessageRoleAssistant,
-							Content: &schemas.ChatMessageContent{ContentStr: &content},
-						},
+					Message: schemas.ChatMessage{
+						Role:    "assistant",
+						Content: "response content",
 					},
 				},
 			},
 		},
 	}
 
-	result, bifrostErr, err := p.PostHook(&ctx, resp, nil)
+	result, bifrostErr, err := p.PostHook(ctx, resp, nil)
 	if err != nil {
 		t.Fatalf("PostHook returned error: %v", err)
 	}
@@ -99,18 +95,27 @@ func TestTransportInterceptor(t *testing.T) {
 	p := New(cfg)
 
 	ctx := context.Background()
-	headers := map[string]string{"Content-Type": "application/json"}
-	body := map[string]any{"model": "gpt-4"}
+	req := &schemas.BifrostRequest{
+		ChatRequest: &schemas.ChatRequest{
+			Model: "gpt-4",
+			Messages: []schemas.Message{
+				{
+					Role:    "user",
+					Content: "test",
+				},
+			},
+		},
+	}
 
-	resultHeaders, resultBody, err := p.TransportInterceptor(&ctx, "http://example.com", headers, body)
+	resultReq, shortCircuit, err := p.TransportInterceptor(ctx, req)
 	if err != nil {
 		t.Fatalf("TransportInterceptor returned error: %v", err)
 	}
-	if resultHeaders == nil {
-		t.Error("TransportInterceptor should return headers")
+	if shortCircuit != nil {
+		t.Error("TransportInterceptor should not short-circuit")
 	}
-	if resultBody == nil {
-		t.Error("TransportInterceptor should return body")
+	if resultReq == nil {
+		t.Error("TransportInterceptor should return request")
 	}
 }
 

@@ -253,13 +253,15 @@ func (p *VoyagePlugin) Embed(ctx context.Context, text string, model string) ([]
 		model = Voyage35Lite
 	}
 
-	req := &schemas.EmbeddingRequest{
+	req := &schemas.BifrostEmbeddingRequest{
 		Provider: schemas.ModelProvider(ProviderKey),
 		Model:    model,
 		Input:    text,
 	}
 
-	resp, bifrostErr := p.handleEmbedding(ctx, req)
+	// Convert BifrostEmbeddingRequest (alias for EmbeddingRequest) to handleEmbedding signature
+	embReq := (*schemas.EmbeddingRequest)(req)
+	resp, bifrostErr := p.handleEmbedding(ctx, embReq)
 	if bifrostErr != nil {
 		return nil, fmt.Errorf("embedding failed: %s", bifrostErr.Message)
 	}
@@ -277,13 +279,15 @@ func (p *VoyagePlugin) EmbedBatch(ctx context.Context, texts []string, model str
 		model = Voyage35Lite
 	}
 
-	req := &schemas.EmbeddingRequest{
+	req := &schemas.BifrostEmbeddingRequest{
 		Provider: schemas.ModelProvider(ProviderKey),
 		Model:    model,
 		Texts:    texts,
 	}
 
-	resp, bifrostErr := p.handleEmbedding(ctx, req)
+	// Convert BifrostEmbeddingRequest (alias for EmbeddingRequest) to handleEmbedding signature
+	embReq := (*schemas.EmbeddingRequest)(req)
+	resp, bifrostErr := p.handleEmbedding(ctx, embReq)
 	if bifrostErr != nil {
 		return nil, fmt.Errorf("batch embedding failed: %s", bifrostErr.Message)
 	}

@@ -85,10 +85,12 @@ func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
 }
 
 // writeSSEError writes an error as SSE
-func (s *Server) writeSSEError(w http.ResponseWriter, flusher http.Flusher, err *schemas.BifrostError) {
+func (s *Server) writeSSEError(w http.ResponseWriter, flusher http.Flusher, err error) {
 	msg := "Internal error"
-	if err != nil {
-		msg = err.Message
+	if bifrostErr, ok := err.(*schemas.BifrostError); ok {
+		msg = bifrostErr.Message
+	} else if err != nil {
+		msg = err.Error()
 	}
 	fmt.Fprintf(w, "data: {\"error\":{\"message\":\"%s\"}}\n\n", msg)
 	flusher.Flush()
@@ -137,10 +139,28 @@ func (s *Server) convertToChatRequest(req *ChatCompletionRequest) *schemas.ChatR
 		})
 	}
 
+	params := &schemas.ChatParams{}
+
+	maxTokens := 0
+	if req.MaxTokens != nil {
+		maxTokens = *req.MaxTokens
+	}
+	temperature := 1.0
+	if req.Temperature != nil {
+		temperature = *req.Temperature
+	}
+	topP := 1.0
+	if req.TopP != nil {
+		topP = *req.TopP
+	}
+
 	return &schemas.ChatRequest{
-		Messages:  messages,
-		Model:    req.Model,
-		MaxTokens: 0,
+		Messages:    messages,
+		Model:       req.Model,
+		MaxTokens:   maxTokens,
+		Temperature: temperature,
+		TopP:        topP,
+		Params:      params,
 	}
 }
 

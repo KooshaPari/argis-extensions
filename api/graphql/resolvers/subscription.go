@@ -10,6 +10,57 @@ import (
 
 type subscriptionResolver struct{ *Resolver }
 
+// HealthUpdates subscribes to health status updates for all providers
+func (r *subscriptionResolver) HealthUpdates(ctx context.Context) (<-chan *model.ProviderHealthEvent, error) {
+	ch := make(chan *model.ProviderHealthEvent, 10)
+	id := uuid.New().String()
+
+	r.mu.Lock()
+	r.healthSubs[id] = ch
+	r.mu.Unlock()
+
+	go func() {
+		defer func() {
+			r.mu.Lock()
+			delete(r.healthSubs, id)
+			r.mu.Unlock()
+			close(ch)
+		}()
+
+		// In real implementation, subscribe to NATS JetStream
+		// consumer := nats.Subscribe("bifrost.health.>")
+
+		<-ctx.Done()
+	}()
+
+	return ch, nil
+}
+
+// RoutingUpdates subscribes to routing decision updates
+func (r *subscriptionResolver) RoutingUpdates(ctx context.Context) (<-chan *model.RoutingEvent, error) {
+	ch := make(chan *model.RoutingEvent, 10)
+	id := uuid.New().String()
+
+	r.mu.Lock()
+	r.routingSubs[id] = ch
+	r.mu.Unlock()
+
+	go func() {
+		defer func() {
+			r.mu.Lock()
+			delete(r.routingSubs, id)
+			r.mu.Unlock()
+			close(ch)
+		}()
+
+		// In real implementation, subscribe to NATS JetStream
+
+		<-ctx.Done()
+	}()
+
+	return ch, nil
+}
+
 // ProviderHealth subscribes to provider health events
 func (r *subscriptionResolver) ProviderHealth(ctx context.Context, providerIds []string) (<-chan *model.ProviderHealthEvent, error) {
 	ch := make(chan *model.ProviderHealthEvent, 10)

@@ -132,7 +132,7 @@ func (pm *PluginManager) ExecutePostHooks(
 	var lastHookErr error
 
 	for _, plugin := range plugins {
-		pluginResp, pluginErr, hookErr := plugin.PostHook(ctx, lastResp)
+		pluginResp, pluginErr, hookErr := plugin.PostHook(ctx, lastResp, nil)
 
 		if hookErr != nil {
 			if pm.logger != nil {

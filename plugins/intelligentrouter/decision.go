@@ -204,8 +204,19 @@ func (ir *IntelligentRouter) getAlternatives(candidates []string, selected strin
 func (ir *IntelligentRouter) applyDecision(req *schemas.BifrostRequest, decision *RoutingDecision) *schemas.BifrostRequest {
 	// Clone request and update model/provider using the proper methods
 	modifiedReq := *req
-	modifiedReq.SetModel(decision.SelectedModel)
-	modifiedReq.SetProvider(string(decision.SelectedProvider))
+	// Update the chat request model if present
+	if modifiedReq.ChatRequest != nil {
+		modifiedReq.ChatRequest.Model = decision.SelectedModel
+	}
+	// Update the completion request model if present
+	if modifiedReq.CompletionRequest != nil {
+		modifiedReq.CompletionRequest.Model = decision.SelectedModel
+	}
+	// Update embedding request provider/model if present
+	if modifiedReq.EmbeddingRequest != nil {
+		modifiedReq.EmbeddingRequest.Model = decision.SelectedModel
+		modifiedReq.EmbeddingRequest.Provider = schemas.Provider(decision.SelectedProvider)
+	}
 
 	return &modifiedReq
 }
@@ -222,9 +233,9 @@ func extractPrompt(req *schemas.BifrostRequest) string {
 		return strings.TrimSpace(sb.String())
 	}
 
-	// Handle text completion requests - Input is a string
-	if textReq := req.TextCompletionRequest(); textReq != nil && textReq.Input != "" {
-		return textReq.Input
+	// Handle text completion requests
+	if req.CompletionRequest != nil && req.CompletionRequest.Input != "" {
+		return req.CompletionRequest.Input
 	}
 
 	return ""

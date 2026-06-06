@@ -167,26 +167,11 @@ func (c *Client) Handler() http.Handler {
 	// Stub implementation
 	return nil
 }
-// MetricsSnapshot returns a snapshot of current metrics (safe to copy)
-func (c *Client) MetricsSnapshot() MetricsSnapshot {
+// GetMetrics returns current metrics
+func (c *Client) GetMetrics() Metrics {
 	c.metrics.mu.RLock()
 	defer c.metrics.mu.RUnlock()
-	return MetricsSnapshot{
-		MessagesSent:     c.metrics.MessagesSent,
-		MessagesReceived: c.metrics.MessagesReceived,
-		TotalLatencyMs:   c.metrics.TotalLatencyMs,
-		ErrorCount:       c.metrics.ErrorCount,
-		LastActivity:     c.metrics.LastActivity,
-	}
-}
-
-// MetricsSnapshot is a copy of metrics without the mutex
-type MetricsSnapshot struct {
-	MessagesSent     int64
-	MessagesReceived int64
-	TotalLatencyMs   int64
-	ErrorCount       int64
-	LastActivity     time.Time
+	return *c.metrics
 }
 
 // OnEvent registers an event handler

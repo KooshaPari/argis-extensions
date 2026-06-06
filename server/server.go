@@ -186,17 +186,70 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Non-streaming request
-	resp, err := s.bifrost.ChatCompletionRequest(r.Context(), bifrostChatReq)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, err.Error())
+	// Convert BifrostChatRequest to ChatRequest (alias for CompletionRequest)
+	maxTokens := 0
+	if bifrostChatReq.MaxTokens != nil {
+		maxTokens = *bifrostChatReq.MaxTokens
+	}
+	temperature := 1.0
+	if bifrostChatReq.Temperature != nil {
+		temperature = *bifrostChatReq.Temperature
+	}
+	topP := 1.0
+	if bifrostChatReq.TopP != nil {
+		topP = *bifrostChatReq.TopP
+	}
+	chatReq := &schemas.ChatRequest{
+		Model:       bifrostChatReq.Model,
+		Messages:    s.convertBifrostMessagesToSchemas(bifrostChatReq.Messages),
+		MaxTokens:   maxTokens,
+		Temperature: temperature,
+		TopP:        topP,
+	}
+	resp, bifrostErr := s.bifrost.ChatCompletionRequest(r.Context(), chatReq)
+	if bifrostErr != nil {
+		statusCode := http.StatusInternalServerError
+		bifrostErrorObj, ok := bifrostErr.(*schemas.BifrostError)
+		if ok && bifrostErrorObj.StatusCode != nil && *bifrostErrorObj.StatusCode != 0 {
+			statusCode = *bifrostErrorObj.StatusCode
+		}
+		msg := "Internal error"
+		if ok && bifrostErrorObj.Message != "" {
+			msg = bifrostErrorObj.Message
+		}
+		s.writeError(w, statusCode, msg)
 		return
 	}
-	openAIResp := s.convertToOpenAIChatResponse(resp, req.Model)
+	// Convert ChatResponse to OpenAI format
+	openAIResp := &ChatCompletionResponse{
+		ID:      resp.ID,
+		Object:  "chat.completion",
+		Created: resp.Created,
+		Model:   req.Model,
+		Choices: []ChatCompletionChoice{},
+		Usage:   &Usage{},
+	}
+	if len(resp.Choices) > 0 {
+		choice := resp.Choices[0]
+		openAIResp.Choices = append(openAIResp.Choices, ChatCompletionChoice{
+			Index: choice.Index,
+			Message: &ChatMessage{
+				Role:    choice.Message.Role,
+				Content: choice.Message.Content,
+			},
+			FinishReason: &choice.FinishReason,
+		})
+	}
+	if resp.Usage.TotalTokens > 0 {
+		openAIResp.Usage.TotalTokens = resp.Usage.TotalTokens
+		openAIResp.Usage.PromptTokens = resp.Usage.PromptTokens
+		openAIResp.Usage.CompletionTokens = resp.Usage.CompletionTokens
+	}
 	s.writeJSON(w, http.StatusOK, openAIResp)
 }
 
 // handleStreamingChatCompletion handles streaming responses
-func (s *Server) handleStreamingChatCompletion(w http.ResponseWriter, r *http.Request, req *schemas.ChatRequest) {
+func (s *Server) handleStreamingChatCompletion(w http.ResponseWriter, r *http.Request, req *schemas.BifrostChatRequest) {
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -209,42 +262,56 @@ func (s *Server) handleStreamingChatCompletion(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Use streaming API - returns a single response in streaming format
-	streamResp, err := s.bifrost.ChatCompletionStreamRequest(r.Context(), req)
-	if err != nil {
-		fmt.Fprintf(w, "data: {\"error\":{\"message\":\"%s\"}}\n\n", err.Error())
-		flusher.Flush()
+	// Convert BifrostChatRequest to ChatRequest
+	maxTokens := 0
+	if req.MaxTokens != nil {
+		maxTokens = *req.MaxTokens
+	}
+	temperature := 1.0
+	if req.Temperature != nil {
+		temperature = *req.Temperature
+	}
+	topP := 1.0
+	if req.TopP != nil {
+		topP = *req.TopP
+	}
+	chatReq := &schemas.ChatRequest{
+		Model:       req.Model,
+		Messages:    s.convertBifrostMessagesToSchemas(req.Messages),
+		MaxTokens:   maxTokens,
+		Temperature: temperature,
+		TopP:        topP,
+	}
+
+	// Use streaming API
+	streamResp, bifrostErr := s.bifrost.ChatCompletionStreamRequest(r.Context(), chatReq)
+	if bifrostErr != nil {
+		s.writeSSEError(w, flusher, bifrostErr)
 		return
 	}
 
-	// Write the streaming response
-	chunk := map[string]interface{}{
-		"id":      streamResp.ID,
-		"object":  "chat.completion.chunk",
-		"created": streamResp.Created,
-		"model":   req.Model,
-		"choices": []map[string]interface{}{},
-	}
-
-	for i, choice := range streamResp.Choices {
-		content := ""
-		if len(choice.Message.Content) > 0 {
-			content = choice.Message.Content
+	// Stream responses (BifrostStreamResponse is a single response, not a channel)
+	if streamResp != nil {
+		for _, choice := range streamResp.Choices {
+			convertedResp := &schemas.ChatResponse{
+				ID:      streamResp.ID,
+				Object:  streamResp.Object,
+				Created: streamResp.Created,
+				Model:   streamResp.Model,
+				Choices: []schemas.ChatResponseChoice{
+					{
+						Index: choice.Index,
+						Message: schemas.ChatMessage{
+							Role:    "assistant",
+							Content: choice.Message.Content,
+						},
+						FinishReason: choice.FinishReason,
+					},
+				},
+			}
+			s.writeSSEChatResponse(w, flusher, convertedResp, req.Model)
 		}
-		chunk["choices"] = append(chunk["choices"].([]map[string]interface{}), map[string]interface{}{
-			"index": i,
-			"delta": map[string]string{
-				"role":    choice.Message.Role,
-				"content": content,
-			},
-			"finish_reason": nil,
-		})
 	}
-
-	data, _ := json.Marshal(chunk)
-	fmt.Fprintf(w, "data: %s\n\n", data)
-	flusher.Flush()
-
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()
 }
@@ -270,9 +337,14 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	// Create Bifrost text completion request
 	bifrostTextReq := s.convertToBifrostTextCompletionRequest(prompt, model)
 
-	textResp, err := s.bifrost.TextCompletionRequest(r.Context(), bifrostTextReq)
-	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, "Text completion failed: "+err.Error())
+	textResp, textErr := s.bifrost.TextCompletionRequest(r.Context(), bifrostTextReq)
+	if textErr != nil {
+		statusCode := http.StatusInternalServerError
+		bifrostErrorObj, ok := textErr.(*schemas.BifrostError)
+		if ok && bifrostErrorObj.StatusCode != nil && *bifrostErrorObj.StatusCode != 0 {
+			statusCode = *bifrostErrorObj.StatusCode
+		}
+		s.writeError(w, statusCode, "Text completion failed")
 		return
 	}
 	s.writeJSON(w, http.StatusOK, textResp)
@@ -294,29 +366,37 @@ func (s *Server) handleListModels(w http.ResponseWriter, r *http.Request) {
 }
 
 // convertToBifrostChatRequest converts OpenAI chat completion request to Bifrost format
-func (s *Server) convertToBifrostChatRequest(req *ChatCompletionRequest) *schemas.ChatRequest {
-	messages := make([]schemas.ChatMessage, len(req.Messages))
+func (s *Server) convertToBifrostChatRequest(req *ChatCompletionRequest) *schemas.BifrostChatRequest {
+	messages := make([]schemas.BifrostChatMessage, len(req.Messages))
 	for i, msg := range req.Messages {
-		messages[i] = schemas.ChatMessage{
+		messages[i] = schemas.BifrostChatMessage{
 			Role:    msg.Role,
 			Content: msg.Content,
 		}
 	}
-	
-	var maxTokens int
-	if req.MaxTokens != nil {
-		maxTokens = *req.MaxTokens
-	}
-	
-	return &schemas.ChatRequest{
-		Model:     req.Model,
-		Messages:  messages,
-		MaxTokens: maxTokens,
+	return &schemas.BifrostChatRequest{
+		Model:       req.Model,
+		Messages:    messages,
+		Temperature: req.Temperature,
+		MaxTokens:   req.MaxTokens,
+		Stream:      req.Stream,
 	}
 }
 
+// convertBifrostMessagesToSchemas converts BifrostChatMessage to schemas.Message
+func (s *Server) convertBifrostMessagesToSchemas(msgs []schemas.BifrostChatMessage) []schemas.Message {
+	messages := make([]schemas.Message, len(msgs))
+	for i, msg := range msgs {
+		messages[i] = schemas.Message{
+			Role:    msg.Role,
+			Content: msg.Content,
+		}
+	}
+	return messages
+}
+
 // convertToOpenAIChatResponse converts Bifrost response to OpenAI format
-func (s *Server) convertToOpenAIChatResponse(resp *schemas.ChatResponse, model string) *ChatCompletionResponse {
+func (s *Server) convertToOpenAIChatResponse(resp *schemas.BifrostChatResponse, model string) *ChatCompletionResponse {
 	choices := make([]ChatCompletionChoice, len(resp.Choices))
 	for i, choice := range resp.Choices {
 		finishReason := choice.FinishReason
@@ -332,7 +412,7 @@ func (s *Server) convertToOpenAIChatResponse(resp *schemas.ChatResponse, model s
 	return &ChatCompletionResponse{
 		ID:      resp.ID,
 		Object:  "chat.completion",
-		Created: resp.Created,
+		Created: time.Now().Unix(),
 		Model:   model,
 		Choices: choices,
 		Usage: &Usage{
@@ -344,8 +424,8 @@ func (s *Server) convertToOpenAIChatResponse(resp *schemas.ChatResponse, model s
 }
 
 // convertToBifrostTextCompletionRequest creates Bifrost text completion request
-func (s *Server) convertToBifrostTextCompletionRequest(prompt string, model string) *schemas.CompletionRequest {
-	return &schemas.CompletionRequest{
+func (s *Server) convertToBifrostTextCompletionRequest(prompt string, model string) *schemas.TextCompletionRequest {
+	return &schemas.TextCompletionRequest{
 		Model: model,
 		Input: prompt,
 	}

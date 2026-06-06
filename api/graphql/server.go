@@ -19,7 +19,6 @@ import (
 	"github.com/kooshapari/bifrost-extensions/api/graphql/gen"
 	"github.com/kooshapari/bifrost-extensions/api/graphql/resolvers"
 	"github.com/kooshapari/bifrost-extensions/db"
-	"github.com/vektah/gqlparser/v2/ast"
 )
 
 // Server wraps the GraphQL handler and provides HTTP endpoints.
@@ -89,14 +88,14 @@ func NewServerWithConfig(database *db.DB, cfg Config, opts ...resolvers.Resolver
 	})
 
 	// Query caching
-	srv.SetQueryCache(lru.New[*ast.QueryDocument](cfg.QueryCacheSize))
+	srv.SetQueryCache(lru.New(cfg.QueryCacheSize))
 
 	// Extensions
 	if cfg.EnableIntrospection {
 		srv.Use(extension.Introspection{})
 	}
 	srv.Use(extension.AutomaticPersistedQuery{
-		Cache: lru.New[string](100),
+		Cache: lru.New(100),
 	})
 
 	// Error recovery

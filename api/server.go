@@ -12,8 +12,9 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/kooshapari/bifrost-extensions/api/connect"
-	"github.com/kooshapari/bifrost-extensions/api/graphql"
+
+	connect_api "github.com/kooshapari/bifrost-extensions/api/connect"
+	graphql_api "github.com/kooshapari/bifrost-extensions/api/graphql"
 	"github.com/kooshapari/bifrost-extensions/api/graphql/resolvers"
 	"github.com/kooshapari/bifrost-extensions/db"
 )
@@ -25,12 +26,9 @@ type Server struct {
 	metrics   *Metrics
 	startTime time.Time
 
-	// HTTP server for graceful shutdown
-	srv *http.Server
-
 	// Sub-servers
-	connect *connect.Server
-	graphql *graphql.Server
+	connectSrv *connect_api.Server
+	graphqlSrv *graphql_api.Server
 
 	// Configuration
 	config Config
@@ -42,21 +40,21 @@ type Config struct {
 	RESTAddr string
 	// Connect endpoint (internal gRPC-like)
 	ConnectAddr string
-	// GraphQL endpoint  
+	// GraphQL endpoint
 	GraphQLAddr string
-	
+
 	// Unified server address (all APIs on one port with path routing)
 	UnifiedAddr string
-	
+
 	// Logging
 	Logger *slog.Logger
-	
+
 	// Database connection (for health checks)
 	Database *db.DB
-	
+
 	// CORS configuration
 	AllowedOrigins []string
-	
+
 	// Development mode
 	DevMode bool
 }
@@ -94,7 +92,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 	r.Use(MetricsMiddleware(metrics))
-	
+
 	// CORS
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.AllowedOrigins,
@@ -106,24 +104,24 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	}))
 
 	// Create sub-servers
-	connectServer := connect.NewServer(connect.Config{
+	connectServer := connect_api.NewServer(connect_api.Config{
 		Logger: logger,
 	})
 
-	graphqlServer := graphql.NewServerWithConfig(database, graphql.Config{
-		Logger:           logger,
-		EnablePlayground: cfg.DevMode,
+	graphqlServer := graphql_api.NewServerWithConfig(database, graphql_api.Config{
+		Logger:              logger,
+		EnablePlayground:    cfg.DevMode,
 		EnableIntrospection: cfg.DevMode,
 	})
 
 	server := &Server{
-		router:    r,
-		logger:    logger,
-		metrics:   metrics,
-		startTime: time.Now(),
-		connect:   connectServer,
-		graphql:   graphqlServer,
-		config:    cfg,
+		router:     r,
+		logger:     logger,
+		metrics:    metrics,
+		startTime:  time.Now(),
+		connectSrv: connectServer,
+		graphqlSrv: graphqlServer,
+		config:     cfg,
 	}
 
 	// Register routes
@@ -137,7 +135,7 @@ func (s *Server) registerRoutes() {
 	// Health check
 	s.router.Get("/health", s.healthHandler)
 	s.router.Get("/ready", s.readyHandler)
-	
+
 	// Metrics endpoint
 	s.router.Get("/metrics", promhttp.Handler().ServeHTTP)
 
@@ -152,10 +150,10 @@ func (s *Server) registerRoutes() {
 	})
 
 	// Connect/gRPC - Internal high-performance API
-	s.router.Mount("/connect", s.connect.Handler())
+	s.router.Mount("/connect", s.connectSrv.Handler())
 
 	// GraphQL - Query layer
-	s.graphql.RegisterRoutes(s.router)
+	s.graphqlSrv.RegisterRoutes(s.router)
 
 	s.logger.Info("API routes registered",
 		"rest", "/v1/*",
@@ -171,45 +169,17 @@ func (s *Server) Handler() http.Handler {
 
 // ListenAndServe starts the unified server
 func (s *Server) ListenAndServe() error {
-	s.srv = &http.Server{
-		Addr:    s.config.UnifiedAddr,
-		Handler: s.router,
-	}
 	s.logger.Info("starting unified API server", "address", s.config.UnifiedAddr)
-	return s.srv.ListenAndServe()
+	return http.ListenAndServe(s.config.UnifiedAddr, s.router)
 }
 
 // Shutdown gracefully shuts down the server
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.logger.Info("shutting down API server")
-
-	// Cancel sub-servers if they support context cancellation
-	if s.connect != nil {
-		s.logger.Debug("shutting down connect server")
-	}
-	if s.graphql != nil {
-		s.logger.Debug("shutting down graphql server")
-	}
-
-	// If no server is running, return early
-	if s.srv == nil {
-		s.logger.Info("no server running, shutdown complete")
-		return nil
-	}
-
-	// Actually shut down the HTTP server
-	s.logger.Info("initiating HTTP server shutdown")
-	if err := s.srv.Shutdown(ctx); err != nil {
-		s.logger.Error("HTTP server shutdown failed", "error", err)
-		return err
-	}
-
-	s.logger.Info("API server shutdown complete")
 	return nil
 }
 
 // GraphQLResolver returns the GraphQL resolver for event publishing
 func (s *Server) GraphQLResolver() *resolvers.Resolver {
-	return s.graphql.Resolver()
+	return s.graphqlSrv.Resolver()
 }
-

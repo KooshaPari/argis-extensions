@@ -4,10 +4,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/maximhq/bifrost/core/schemas"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kooshapari/bifrost-extensions/account"
 	"github.com/kooshapari/bifrost-extensions/cmd/bifrost/cli/testutil"
 )
 
@@ -110,10 +110,11 @@ func TestSetupProviders(t *testing.T) {
 	t.Run("setup providers with OPENAI_API_KEY", func(t *testing.T) {
 		cleanup := testutil.SetEnv("OPENAI_API_KEY", "sk-test-key")
 		defer cleanup()
-		
-		acct := account.NewEnhancedAccount(nil)
+
+		baseAccount := &schemas.Account{ID: "test"}
+		acct := schemas.NewEnhancedAccount(baseAccount)
 		setupProviders(acct)
-		
+
 		// Verify provider was set up
 		// This would require access to account internals or integration test
 		assert.NotNil(t, acct)
@@ -122,10 +123,11 @@ func TestSetupProviders(t *testing.T) {
 	t.Run("setup providers with ANTHROPIC_API_KEY", func(t *testing.T) {
 		cleanup := testutil.SetEnv("ANTHROPIC_API_KEY", "sk-ant-test-key")
 		defer cleanup()
-		
-		acct := account.NewEnhancedAccount(nil)
+
+		baseAccount := &schemas.Account{ID: "test"}
+		acct := schemas.NewEnhancedAccount(baseAccount)
 		setupProviders(acct)
-		
+
 		assert.NotNil(t, acct)
 	})
 
@@ -134,10 +136,11 @@ func TestSetupProviders(t *testing.T) {
 		cleanup2 := testutil.SetEnv("ANTHROPIC_API_KEY", "sk-ant-test-key")
 		defer cleanup1()
 		defer cleanup2()
-		
-		acct := account.NewEnhancedAccount(nil)
+
+		baseAccount := &schemas.Account{ID: "test"}
+		acct := schemas.NewEnhancedAccount(baseAccount)
 		setupProviders(acct)
-		
+
 		assert.NotNil(t, acct)
 	})
 
@@ -146,10 +149,11 @@ func TestSetupProviders(t *testing.T) {
 		cleanup2 := testutil.UnsetEnv("ANTHROPIC_API_KEY")
 		defer cleanup1()
 		defer cleanup2()
-		
-		acct := account.NewEnhancedAccount(nil)
+
+		baseAccount := &schemas.Account{ID: "test"}
+		acct := schemas.NewEnhancedAccount(baseAccount)
 		setupProviders(acct)
-		
+
 		// Should not error, just not set up providers
 		assert.NotNil(t, acct)
 	})

@@ -6,6 +6,13 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
   workflow_dispatch:
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 
 jobs:
   update_release_draft:
@@ -13,4 +20,4 @@ jobs:
     steps:
       - uses: release-drafter/release-drafter@{"message":"Not Found","documentation_url":"https://docs.github.com/rest/commits/commits#get-a-commit","status":"404"}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}

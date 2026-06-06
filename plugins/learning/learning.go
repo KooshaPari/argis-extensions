@@ -128,6 +128,7 @@ func (lp *LearningPlugin) PreHook(
 func (lp *LearningPlugin) PostHook(
 	ctx context.Context,
 	resp *schemas.BifrostResponse,
+	err error,
 ) (*schemas.BifrostResponse, *schemas.BifrostError, error) {
 	if !lp.config.Enabled {
 		return resp, nil, nil
@@ -148,7 +149,7 @@ func (lp *LearningPlugin) PostHook(
 		ModelName: model,
 		Provider:  string(provider),
 		Latency:   latency,
-		Success:   resp != nil && resp.ChatResponse != nil,
+		Success:   err == nil,
 		Timestamp: time.Now(),
 	}
 

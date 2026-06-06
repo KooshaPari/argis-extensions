@@ -11,6 +11,34 @@ import (
 	"github.com/kooshapari/bifrost-extensions/db"
 )
 
+// Store interface definitions for GraphQL resolvers
+type ModelFilter struct{}
+
+type ModelStore interface {
+	GetModel(ctx context.Context, id string) (interface{}, error)
+	ListModels(ctx context.Context, filter *ModelFilter) ([]interface{}, error)
+	CreateModel(ctx context.Context, data interface{}) (interface{}, error)
+	UpdateModelStatus(ctx context.Context, id string, available bool) (interface{}, error)
+}
+
+type ProviderStore interface {
+	RefreshToken(ctx context.Context, id string) error
+}
+
+type BenchmarkStore interface {
+	CreateBenchmark(ctx context.Context, data interface{}) (interface{}, error)
+}
+
+type UsageStore interface{}
+
+type RoutingStore interface{}
+
+type PolicyStore interface {
+	UpdatePolicy(ctx context.Context, id string, data interface{}) (interface{}, error)
+	ActivatePolicy(ctx context.Context, id string) (interface{}, error)
+	DeactivatePolicy(ctx context.Context, id string) (interface{}, error)
+}
+
 // Resolver is the root resolver that provides access to all sub-resolvers.
 type Resolver struct {
 	db     *db.DB
@@ -99,99 +127,4 @@ func (r *Resolver) Mutation() gen.MutationResolver {
 // Subscription returns the SubscriptionResolver implementation.
 func (r *Resolver) Subscription() gen.SubscriptionResolver {
 	return &subscriptionResolver{r}
-}
-// Store interfaces - to be implemented by actual data layer
-
-// ModelStore provides model data access
-type ModelStore interface {
-	GetModel(ctx context.Context, id string) (*model.Model, error)
-	ListModels(ctx context.Context, filter ModelFilter) ([]*model.Model, int, error)
-	UpdateModelStatus(ctx context.Context, id string, available bool) (*model.Model, error)
-}
-
-// ProviderStore provides provider data access
-type ProviderStore interface {
-	GetProvider(ctx context.Context, id string) (*model.Provider, error)
-	ListProviders(ctx context.Context) ([]*model.Provider, error)
-	RefreshToken(ctx context.Context, providerID, accountID string) (*model.Account, error)
-}
-
-// BenchmarkStore provides benchmark data access
-type BenchmarkStore interface {
-	GetBenchmark(ctx context.Context, id string) (*model.Benchmark, error)
-	ListBenchmarks(ctx context.Context, filter BenchmarkFilter) ([]*model.Benchmark, int, error)
-	CreateBenchmark(ctx context.Context, input model.BenchmarkInput) (*model.Benchmark, error)
-}
-
-// UsageStore provides usage data access
-type UsageStore interface {
-	GetUsageReport(ctx context.Context, filter UsageFilter) (*model.UsageReport, error)
-}
-
-// RoutingStore provides routing history access
-type RoutingStore interface {
-	GetRoutingHistory(ctx context.Context, filter RoutingFilter) ([]*model.RoutingHistory, int, error)
-}
-
-// PolicyStore provides policy data access
-type PolicyStore interface {
-	GetPolicy(ctx context.Context, id string) (*model.Policy, error)
-	ListPolicies(ctx context.Context, filter PolicyFilter) ([]*model.Policy, error)
-	CreatePolicy(ctx context.Context, input model.PolicyInput) (*model.Policy, error)
-	UpdatePolicy(ctx context.Context, id string, input model.PolicyInput) (*model.Policy, error)
-	ActivatePolicy(ctx context.Context, id string) (*model.Policy, error)
-	DeactivatePolicy(ctx context.Context, id string) (*model.Policy, error)
-}
-
-// Filter types
-type ModelFilter struct {
-	Provider     *string
-	Capabilities []model.Capability
-	Available    *bool
-	Limit        int
-	Offset       int
-}
-
-type BenchmarkFilter struct {
-	Models    []string
-	Metrics   []model.MetricType
-	StartDate *string
-	EndDate   *string
-	Limit     int
-}
-
-type UsageFilter struct {
-	Timeframe model.Timeframe
-	GroupBy   []model.GroupByField
-	Filters   *model.UsageFilters
-}
-
-type RoutingFilter struct {
-	SessionID *string
-	UserID    *string
-	Limit     int
-	Offset    int
-}
-
-type PolicyFilter struct {
-	Type   *model.PolicyType
-	Active *bool
-}
-
-// Add missing methods to queryResolver
-func (r *queryResolver) Health(ctx context.Context) (*model.HealthStatus, error) {
-	return &model.HealthStatus{
-		Status: "healthy",
-	}, nil
-}
-
-// Add missing methods to mutationResolver
-func (r *mutationResolver) DeleteModel(ctx context.Context, id string) (bool, error) {
-	return true, nil
-}
-
-// Add missing methods to subscriptionResolver
-func (r *subscriptionResolver) HealthUpdates(ctx context.Context) (<-chan *model.ProviderHealthEvent, error) {
-	ch := make(chan *model.ProviderHealthEvent)
-	return ch, nil
 }

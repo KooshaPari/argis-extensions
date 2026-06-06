@@ -53,6 +53,8 @@ func TestHotReloadNoDowntime(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
+	_ = t.TempDir()
+
 	// TODO: Implement hot-reload without downtime test
 	// This test should:
 	// 1. Start server with initial config
@@ -101,6 +103,9 @@ server:
 
 // TestHotReloadSections tests hot-reload for different config sections
 func TestHotReloadSections(t *testing.T) {
+	tmpDir := t.TempDir()
+	_ = tmpDir
+
 	tests := []struct {
 		name           string
 		initialConfig  string
@@ -209,6 +214,9 @@ plugins:
 
 // TestConcurrentConfigChanges tests handling of concurrent config changes
 func TestConcurrentConfigChanges(t *testing.T) {
+	tmpDir := t.TempDir()
+	_ = filepath.Join(tmpDir, "config.yaml")
+
 	// TODO: Implement concurrent changes test
 	// This test should:
 	// 1. Create config with watcher

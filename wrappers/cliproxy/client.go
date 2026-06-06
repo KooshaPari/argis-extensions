@@ -145,35 +145,11 @@ func (c *Client) ExecuteStream(ctx context.Context, providers []string, req Requ
 	return ch, nil
 }
 
-// MetricsSnapshot returns a snapshot of current metrics (safe to copy)
-func (c *Client) MetricsSnapshot() MetricsSnapshot {
+// GetMetrics returns current metrics
+func (c *Client) GetMetrics() Metrics {
 	c.metrics.mu.RLock()
 	defer c.metrics.mu.RUnlock()
-	snapshot := MetricsSnapshot{
-		RequestsTotal:   c.metrics.RequestsTotal,
-		RequestsSuccess: c.metrics.RequestsSuccess,
-		RequestsFailed:  c.metrics.RequestsFailed,
-		TokensProcessed: c.metrics.TokensProcessed,
-		TotalLatencyMs:  c.metrics.TotalLatencyMs,
-		LastActivity:    c.metrics.LastActivity,
-		ProviderMetrics: make(map[string]*ProviderMetrics, len(c.metrics.ProviderMetrics)),
-	}
-	for k, v := range c.metrics.ProviderMetrics {
-		pmCopy := *v
-		snapshot.ProviderMetrics[k] = &pmCopy
-	}
-	return snapshot
-}
-
-// MetricsSnapshot is a copy of metrics without the mutex
-type MetricsSnapshot struct {
-	RequestsTotal   int64
-	RequestsSuccess int64
-	RequestsFailed  int64
-	TokensProcessed int64
-	TotalLatencyMs  int64
-	ProviderMetrics map[string]*ProviderMetrics
-	LastActivity    time.Time
+	return *c.metrics
 }
 
 // OnEvent registers an event handler

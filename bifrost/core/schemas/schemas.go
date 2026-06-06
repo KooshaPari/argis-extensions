@@ -106,6 +106,8 @@ type ChatParams struct {
 	Tools []ChatTool `json:"tools,omitempty"`
 }
 
+// Note: ChatParameters would be an alias for ChatParams but it's defined below with different fields
+
 // ChatTool represents a chat tool
 type ChatTool struct {
 	Type     string       `json:"type"`
@@ -121,6 +123,10 @@ type ChatFunction struct {
 
 // ChatRequest is an alias for CompletionRequest
 type ChatRequest = CompletionRequest
+
+// BifrostChatRequest is an alias for ChatRequest (or CompletionRequest)
+// Note: This aligns with the schema refactor where Bifrost* types are canonical
+type BifrostChatRequestCompat = BifrostChatRequest
 
 // CompletionResponse represents a completion response
 type CompletionResponse struct {
@@ -192,6 +198,12 @@ type EmbeddingResponse struct {
 	Object string          `json:"object,omitempty"`
 }
 
+// BifrostEmbeddingRequest is an alias for EmbeddingRequest
+type BifrostEmbeddingRequest = EmbeddingRequest
+
+// BifrostEmbeddingResponse is an alias for EmbeddingResponse
+type BifrostEmbeddingResponse = EmbeddingResponse
+
 // BifrostRequest represents a bifrost request
 type BifrostRequest struct {
 	CompletionRequest *CompletionRequest `json:"completion_request,omitempty"`
@@ -239,6 +251,18 @@ type BifrostChatResponse struct {
 	Usage   *Usage                  `json:"usage,omitempty"`
 	Model   string                  `json:"model,omitempty"`
 	Object  string                  `json:"object,omitempty"`
+}
+
+// BifrostStream is an alias for streaming chunks
+type BifrostStream = BifrostStreamChunk
+
+// BifrostStreamChunk represents a chunk in a streaming response
+type BifrostStreamChunk struct {
+	ID      string                  `json:"id"`
+	Object  string                  `json:"object,omitempty"`
+	Created int64                   `json:"created"`
+	Model   string                  `json:"model"`
+	Choices []BifrostResponseChoice `json:"choices,omitempty"`
 }
 
 // BifrostResponseChoice represents a chat response choice
@@ -292,7 +316,7 @@ type Plugin interface {
 	Config() map[string]interface{}
 	TransportInterceptor(ctx context.Context, req *BifrostRequest) (*BifrostRequest, *PluginShortCircuit, error)
 	PreHook(ctx context.Context, req *BifrostRequest) (*BifrostRequest, *PluginShortCircuit, error)
-	PostHook(ctx context.Context, resp *BifrostResponse) (*BifrostResponse, *BifrostError, error)
+	PostHook(ctx context.Context, resp *BifrostResponse, err error) (*BifrostResponse, *BifrostError, error)
 	Cleanup() error
 }
 type PluginShortCircuit struct {
@@ -391,48 +415,13 @@ type Content struct {
 	Text string `json:"text,omitempty"`
 }
 
-// ChatMessageRole represents message roles
-
-// Missing provider constants
-const Mistral = "mistral"
-const Bedrock = "bedrock"
-const Cohere = "cohere"
-const Voyage = "cohere"
-
-// ChatMessageRoleSystem constant
-const ChatMessageRoleSystem = "system"
-
-// ChatResponseChoice type
-type ChatResponseChoice struct {
-	Index        int
-	Message      ChatMessage
-	FinishReason string
-}
-
-// Logger interface
-type Logger interface {
-	Debug(msg string, args ...interface{})
-	Info(msg string, args ...interface{})
-	Warn(msg string, args ...interface{})
-	Error(msg string, args ...interface{})
-}
-
-// Bifrost type for server
-type Bifrost struct {
-	config *BifrostConfig
-}
-
-func NewBifrost(cfg *BifrostConfig) *Bifrost {
-	return &Bifrost{config: cfg}
-}
-
-// BifrostConfig type
-type BifrostConfig struct {
-	Account         *Account
-	Plugins         []Plugin
-	LogLevel        string
-	Logger          Logger
-	InitialPoolSize int
+// Model represents an available model
+type Model struct {
+	ID       string `json:"id"`
+	Object   string `json:"object,omitempty"`
+	Created  int64  `json:"created,omitempty"`
+	OwnedBy  string `json:"owned_by,omitempty"`
+	Provider Provider `json:"provider,omitempty"`
 }
 
 // BifrostRequest methods
@@ -482,69 +471,66 @@ type BifrostChatContent struct {
 // TextCompletionRequest alias
 type TextCompletionRequest = CompletionRequest
 
-// ChatParameters type
-type ChatParameters struct {
-	Model            string  `json:"model"`
-	MaxTokens        int     `json:"max_tokens,omitempty"`
-	Temperature      float64 `json:"temperature,omitempty"`
-	TopP             float64 `json:"top_p,omitempty"`
-	FrequencyPenalty float64 `json:"frequency_penalty,omitempty"`
-	PresencePenalty  float64 `json:"presence_penalty,omitempty"`
+// BifrostTextCompletionRequest is an alias for CompletionRequest for text completion
+type BifrostTextCompletionRequest = CompletionRequest
+
+// BifrostTextCompletionResponse represents a text completion response
+type BifrostTextCompletionResponse struct {
+	ID      string `json:"id"`
+	Object  string `json:"object,omitempty"`
+	Created int64  `json:"created"`
+	Model   string `json:"model"`
+	Choices []struct {
+		Text         string `json:"text"`
+		Index        int    `json:"index"`
+		LogProbs     *interface{} `json:"logprobs,omitempty"`
+		FinishReason string `json:"finish_reason,omitempty"`
+	} `json:"choices"`
+	Usage Usage `json:"usage,omitempty"`
 }
 
-// BifrostStreamResponse type
-type BifrostStreamResponse struct {
-	ID      string               `json:"id"`
-	Object  string              `json:"object"`
-	Created int64               `json:"created"`
-	Model   string              `json:"model"`
-	Choices []ChatResponseChoice `json:"choices"`
+// BifrostConfig type
+type BifrostConfig struct {
+	Account         *Account
+	Plugins         []Plugin
+	LogLevel        string
+	Logger          Logger
+	InitialPoolSize int
 }
 
-// Model type
-type Model struct {
-	ID       string `json:"id"`
-	Provider string `json:"provider"`
-	Name     string `json:"name"`
-	Object   string `json:"object,omitempty"`
-	Created  int64  `json:"created,omitempty"`
-	OwnedBy  string `json:"owned_by,omitempty"`
+// Missing provider constants
+const Mistral = "mistral"
+const Bedrock = "bedrock"
+const Cohere = "cohere"
+const Voyage = "cohere"
+
+// ChatMessageRoleSystem constant
+const ChatMessageRoleSystem = "system"
+
+// ChatResponseChoice type
+type ChatResponseChoice struct {
+	Index        int
+	Message      ChatMessage
+	FinishReason string
 }
 
-// Content method for ChatResponse
-func (r *ChatResponse) GetContent() string {
-	if len(r.Choices) > 0 {
-		return r.Choices[0].Message.Content
-	}
-	return ""
+// Logger interface
+type Logger interface {
+	Debug(msg string, args ...interface{})
+	Info(msg string, args ...interface{})
+	Warn(msg string, args ...interface{})
+	Error(msg string, args ...interface{})
 }
 
-// BifrostEmbeddingRequest and Response types
-type BifrostEmbeddingRequest struct {
-	Provider Provider          `json:"provider"`
-	Model    string            `json:"model"`
-	Input    string            `json:"input,omitempty"`
-	Texts    []string          `json:"texts,omitempty"`
-	Params   *EmbeddingParams  `json:"params,omitempty"`
+// Bifrost type for server
+type Bifrost struct {
+	config *BifrostConfig
 }
 
-type BifrostEmbeddingResponse struct {
-	Data   []EmbeddingData `json:"data"`
-	Model  string          `json:"model"`
-	Usage  Usage           `json:"usage"`
-	Object string          `json:"object,omitempty"`
+func NewBifrost(cfg *BifrostConfig) *Bifrost {
+	return &Bifrost{config: cfg}
 }
 
-// BifrostStream type
-type BifrostStream struct {
-	ID      string               `json:"id"`
-	Object  string               `json:"object"`
-	Created int64                `json:"created"`
-	Model   string               `json:"model"`
-	Choices []ChatResponseChoice `json:"choices"`
-}
-
-// Add missing methods on Bifrost type
 func (b *Bifrost) ChatCompletionRequest(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
 	return &ChatResponse{}, nil
 }
@@ -559,4 +545,32 @@ func (b *Bifrost) TextCompletionRequest(ctx context.Context, req *CompletionRequ
 
 func (b *Bifrost) ListAllModels(ctx context.Context) ([]*Model, error) {
 	return []*Model{}, nil
+}
+
+// BifrostStreamResponse type
+type BifrostStreamResponse struct {
+	ID      string               `json:"id"`
+	Object  string               `json:"object"`
+	Created int64                `json:"created"`
+	Model   string               `json:"model"`
+	Choices []ChatResponseChoice `json:"choices"`
+}
+
+// ChatParameters type
+type ChatParameters struct {
+	Model              string  `json:"model"`
+	MaxTokens          int     `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int    `json:"max_completion_tokens,omitempty"`
+	Temperature        float64 `json:"temperature,omitempty"`
+	TopP               float64 `json:"top_p,omitempty"`
+	FrequencyPenalty  float64 `json:"frequency_penalty,omitempty"`
+	PresencePenalty   float64 `json:"presence_penalty,omitempty"`
+}
+
+// Content method for ChatResponse
+func (r *ChatResponse) GetContent() string {
+	if len(r.Choices) > 0 {
+		return r.Choices[0].Message.Content
+	}
+	return ""
 }
