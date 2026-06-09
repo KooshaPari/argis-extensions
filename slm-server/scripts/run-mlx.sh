@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 # Run SLM Server with MLX backend on MacBook (Apple Silicon)
 # 
 # Prerequisites:

@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 # Test runner script for CLI tests
 # Usage: ./test_runner.sh [unit|integration|all|coverage]
 

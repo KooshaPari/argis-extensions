@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 # Setup vLLM in WSL2 for Homebox (RTX 3090 Ti)
 #
 # Run this script INSIDE WSL2 Ubuntu:

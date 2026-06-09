@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 # Run SLM Server with vLLM backend on Homebox (RTX 3090 Ti)
 #
 # Prerequisites:

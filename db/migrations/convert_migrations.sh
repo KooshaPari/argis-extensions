@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 # Convert existing migration files to golang-migrate format
 # Format: {version}_{name}.up.sql and {version}_{name}.down.sql
 

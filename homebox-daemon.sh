@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 # Bifrost Prompt Adapter - Homebox Daemon Setup
 # Run on Homebox host to start services as background daemons
 

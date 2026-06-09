@@ -1,4 +1,5 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 # Week 3 Testing Script
 # Runs all Week 3 tests and generates coverage reports
 
