@@ -1,3 +1,14 @@
+## Work State
+
+| Field | Value |
+|---|---|
+| Last commit | 2026-05-04 |
+| Open issues | 0 |
+| Open PRs | 7 |
+| Focus | Bifrost LLM gateway extension layer (Go modules) |
+
+Progress: ██████░░░░ 60%
+
 # Bifrost Extensions
 
 Bifrost Extensions is a clean extension layer for the Bifrost LLM gateway, consuming upstream repositories as Go modules without modifications.
