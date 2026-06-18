@@ -18,20 +18,6 @@ type Query {
   
   model(id: ID!): Model
   
-  # Provider queries
-  providers: [Provider!]!
-  provider(id: ID!): Provider
-  
-  # Benchmark queries
-  benchmarks(
-    models: [ID!]
-    metrics: [MetricType!]
-    dateRange: DateRangeInput
-    limit: Int = 50
-  ): BenchmarkConnection!
-  
-  benchmark(id: ID!): Benchmark
-  
   # Usage analytics
   usage(
     timeframe: Timeframe!
@@ -74,9 +60,6 @@ type Mutation {
 }
 
 type Subscription {
-  # Real-time provider health updates
-  providerHealth(providers: [ID!]): ProviderHealthEvent!
-  
   # Model availability changes
   modelAvailability(providers: [ID!]): ModelAvailabilityEvent!
   
@@ -147,6 +130,13 @@ enum ProviderStatus {
   UNKNOWN
 }
 
+type ModelAvailabilityEvent {
+  model: Model!
+  available: Boolean!
+  reason: String
+  timestamp: Time!
+}
+
 
 
 
@@ -201,7 +191,3 @@ input DateRangeInput {
   startDate: DateTime
   endDate: DateTime
 }
-
-# Provider queries
-providers: [Provider!]!
-provider(id: ID!): Provider

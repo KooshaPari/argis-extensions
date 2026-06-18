@@ -12,12 +12,6 @@ model:
   filename: model/models_gen.go
   package: model
 
-resolver:
-  layout: follow-schema
-  dir: resolvers
-  package: resolvers
-  filename_template: "{name}.resolvers.go"
-
 autobind:
   - "github.com/kooshapari/bifrost-extensions/api/graphql/model"
 

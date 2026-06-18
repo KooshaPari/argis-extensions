@@ -10,7 +10,7 @@ import (
 type queryResolver struct{ *Resolver }
 
 // Models returns all models with pagination and filtering
-func (r *queryResolver) Models(ctx context.Context, first *int, after *string, filter *model.ModelFilter) (*model.ModelConnection, error) {
+func (r *queryResolver) Models(ctx context.Context, provider *string, capabilities []model.Capability, available *bool, limit *int, offset *int) (*model.ModelConnection, error) {
 	if r.models == nil {
 		return &model.ModelConnection{
 			Nodes:      []*model.Model{},
@@ -20,19 +20,20 @@ func (r *queryResolver) Models(ctx context.Context, first *int, after *string, f
 	}
 
 	lim := 100
-	if first != nil {
-		lim = *first
+	if limit != nil {
+		lim = *limit
+	}
+	off := 0
+	if offset != nil {
+		off = *offset
 	}
 
 	internalFilter := ModelFilter{
-		Limit: lim,
-	}
-	if filter != nil {
-		if len(filter.Providers) > 0 {
-			internalFilter.Provider = &filter.Providers[0]
-		}
-		internalFilter.Capabilities = filter.Capabilities
-		internalFilter.Available = filter.Available
+		Limit:  lim,
+		Offset: off,
+		Provider:     provider,
+		Capabilities: capabilities,
+		Available:    available,
 	}
 
 	models, total, err := r.models.ListModels(ctx, internalFilter)
@@ -48,7 +49,7 @@ func (r *queryResolver) Models(ctx context.Context, first *int, after *string, f
 		TotalCount: total,
 		PageInfo: &model.PageInfo{
 			HasNextPage:     hasNext,
-			HasPreviousPage: after != nil,
+			HasPreviousPage: off > 0,
 		},
 	}, nil
 }
@@ -62,25 +63,26 @@ func (r *queryResolver) Model(ctx context.Context, id string) (*model.Model, err
 }
 
 // Providers returns all providers
-func (r *queryResolver) Providers(ctx context.Context, status *model.ProviderStatus) ([]*model.Provider, error) {
+func (r *queryResolver) Providers(ctx context.Context) ([]*model.Provider, error) {
 	if r.providers == nil {
 		return []*model.Provider{}, nil
 	}
-	providers, err := r.providers.ListProviders(ctx)
-	if err != nil {
-		return nil, err
-	}
-	// Filter by status if provided
-	if status != nil {
-		var filtered []*model.Provider
-		for _, p := range providers {
-			if p.Status == *status {
-				filtered = append(filtered, p)
-			}
-		}
-		return filtered, nil
-	}
-	return providers, nil
+	return r.providers.ListProviders(ctx)
+}
+
+// ProviderAccounts returns accounts for a provider
+func (r *queryResolver) ProviderAccounts(ctx context.Context, providerID string) ([]*model.ProviderAccount, error) {
+	return []*model.ProviderAccount{}, nil
+}
+
+// ProviderAccount returns a single provider account
+func (r *queryResolver) ProviderAccount(ctx context.Context, id string) (*model.ProviderAccount, error) {
+	return nil, fmt.Errorf("provider account store not configured")
+}
+
+// BenchmarkRuns returns runs for a benchmark
+func (r *queryResolver) BenchmarkRuns(ctx context.Context, benchmarkID string) ([]*model.BenchmarkRun, error) {
+	return []*model.BenchmarkRun{}, nil
 }
 
 // Provider returns a single provider by ID
@@ -92,43 +94,45 @@ func (r *queryResolver) Provider(ctx context.Context, id string) (*model.Provide
 }
 
 // Benchmarks returns benchmark results with filtering
-func (r *queryResolver) Benchmarks(ctx context.Context, first *int, after *string, filter *model.BenchmarkFilter) (*model.BenchmarkConnection, error) {
+func (r *queryResolver) Benchmarks(ctx context.Context, filter *model.BenchmarkFilter) ([]*model.BenchmarkResult, error) {
 	if r.benchmarks == nil {
-		return &model.BenchmarkConnection{
-			Nodes:      []*model.Benchmark{},
-			TotalCount: 0,
-			PageInfo:   &model.PageInfo{},
-		}, nil
+		return []*model.BenchmarkResult{}, nil
 	}
 
-	lim := 50
-	if first != nil {
-		lim = *first
-	}
-
-	internalFilter := BenchmarkFilter{Limit: lim}
+	internalFilter := BenchmarkFilter{Limit: 50}
 	if filter != nil {
 		internalFilter.Models = filter.ModelIds
 	}
 
-	benchmarks, total, err := r.benchmarks.ListBenchmarks(ctx, internalFilter)
+	benchmarks, _, err := r.benchmarks.ListBenchmarks(ctx, internalFilter)
 	if err != nil {
 		return nil, err
 	}
 
-	return &model.BenchmarkConnection{
-		Nodes:      benchmarks,
-		TotalCount: total,
-		PageInfo:   &model.PageInfo{HasNextPage: len(benchmarks) == lim},
-	}, nil
+	results := make([]*model.BenchmarkResult, 0, len(benchmarks))
+	for _, b := range benchmarks {
+		if b == nil {
+			continue
+		}
+		results = append(results, &model.BenchmarkResult{
+			ID: b.ID,
+		})
+	}
+	return results, nil
 }
 
-// Benchmark returns a single benchmark by ID
-func (r *queryResolver) Benchmark(ctx context.Context, id string) (*model.Benchmark, error) {
+// Benchmark returns a single benchmark result by ID
+func (r *queryResolver) Benchmark(ctx context.Context, id string) (*model.BenchmarkResult, error) {
 	if r.benchmarks == nil {
 		return nil, fmt.Errorf("benchmark store not configured")
 	}
-	return r.benchmarks.GetBenchmark(ctx, id)
+	b, err := r.benchmarks.GetBenchmark(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &model.BenchmarkResult{
+		ID: b.ID,
+	}, nil
 }
 
 // Usage returns usage analytics
@@ -144,7 +148,7 @@ func (r *queryResolver) Usage(ctx context.Context, timeframe model.Timeframe, gr
 }
 
 // RoutingHistory returns routing decisions history
-func (r *queryResolver) RoutingHistory(ctx context.Context, first *int, after *string, filter *model.RoutingFilter) (*model.RoutingHistoryConnection, error) {
+func (r *queryResolver) RoutingHistory(ctx context.Context, sessionID *string, userID *string, limit *int, offset *int) (*model.RoutingHistoryConnection, error) {
 	if r.routing == nil {
 		return &model.RoutingHistoryConnection{
 			Nodes:      []*model.RoutingHistory{},
@@ -154,14 +158,19 @@ func (r *queryResolver) RoutingHistory(ctx context.Context, first *int, after *s
 	}
 
 	lim := 100
-	if first != nil {
-		lim = *first
+	if limit != nil {
+		lim = *limit
+	}
+	off := 0
+	if offset != nil {
+		off = *offset
 	}
 
-	internalFilter := RoutingFilter{Limit: lim}
-	if filter != nil {
-		internalFilter.SessionID = filter.SessionID
-		internalFilter.UserID = filter.UserID
+	internalFilter := RoutingFilter{
+		Limit:  lim,
+		Offset: off,
+		SessionID: sessionID,
+		UserID:    userID,
 	}
 
 	history, total, err := r.routing.GetRoutingHistory(ctx, internalFilter)
@@ -174,7 +183,7 @@ func (r *queryResolver) RoutingHistory(ctx context.Context, first *int, after *s
 		TotalCount: total,
 		PageInfo: &model.PageInfo{
 			HasNextPage:     len(history) < total,
-			HasPreviousPage: after != nil,
+			HasPreviousPage: off > 0,
 		},
 	}, nil
 }

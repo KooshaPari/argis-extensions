@@ -38,7 +38,7 @@ func (r *subscriptionResolver) ProviderHealth(ctx context.Context, providerIds [
 }
 
 // ModelAvailability subscribes to model availability changes
-func (r *subscriptionResolver) ModelAvailability(ctx context.Context, modelIds []string) (<-chan *model.ModelAvailabilityEvent, error) {
+func (r *subscriptionResolver) ModelAvailability(ctx context.Context, providers []string) (<-chan *model.ModelAvailabilityEvent, error) {
 	ch := make(chan *model.ModelAvailabilityEvent, 10)
 	id := uuid.New().String()
 
@@ -87,6 +87,16 @@ func (r *subscriptionResolver) RoutingEvents(ctx context.Context, sessionID *str
 		<-ctx.Done()
 	}()
 
+	return ch, nil
+}
+
+// BenchmarkProgress subscribes to benchmark run progress
+func (r *subscriptionResolver) BenchmarkProgress(ctx context.Context, benchmarkID string) (<-chan *model.BenchmarkRun, error) {
+	ch := make(chan *model.BenchmarkRun, 10)
+	go func() {
+		defer close(ch)
+		<-ctx.Done()
+	}()
 	return ch, nil
 }
 

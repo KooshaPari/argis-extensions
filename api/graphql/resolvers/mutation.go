@@ -13,7 +13,7 @@ type mutationResolver struct {
 }
 
 // UpdateModelStatus updates a model's availability status
-func (r *mutationResolver) UpdateModelStatus(ctx context.Context, id string, available bool, reason *string) (*model.Model, error) {
+func (r *mutationResolver) UpdateModelStatus(ctx context.Context, id string, available bool) (*model.Model, error) {
 	if r.models == nil {
 		return nil, fmt.Errorf("model store not configured")
 	}
@@ -32,18 +32,17 @@ func (r *mutationResolver) UpdateModelStatus(ctx context.Context, id string, ava
 	r.PublishModelAvailability(&model.ModelAvailabilityEvent{
 		Model:     updated,
 		Available: available,
-		Reason:    reason,
 	})
 
 	return updated, nil
 }
 
-// CreateModel creates a new model in the registry
-func (r *mutationResolver) CreateModel(ctx context.Context, input model.CreateModelInput) (*model.Model, error) {
-	if r.models == nil {
-		return nil, fmt.Errorf("model store not configured")
+// CreatePolicy creates a new routing policy
+func (r *mutationResolver) CreatePolicy(ctx context.Context, input model.PolicyInput) (*model.Policy, error) {
+	if r.policies == nil {
+		return nil, fmt.Errorf("policy store not configured")
 	}
-	return r.models.CreateModel(ctx, input)
+	return r.policies.CreatePolicy(ctx, input)
 }
 
 // UpdatePolicy updates an existing policy

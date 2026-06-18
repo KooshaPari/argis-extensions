@@ -178,6 +178,7 @@ dist/
 *.lib
 
 # Generated files
+!api/graphql/gen/
 gen/
 generated/
 *.generated.*

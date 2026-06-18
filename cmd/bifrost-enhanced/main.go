@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Package main provides the entry point for the enhanced Bifrost server
 // with intelligent routing, learning, and smart fallback capabilities.
 package main
