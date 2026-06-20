@@ -20,4 +20,4 @@ jobs:
       - name: TruffleHog Secrets Scan
         uses: trufflesecurity/trufflehog@3fc0c2aa6648d54242e4af6fbfde0701796e4fb0
         with:
-          extra_args: --results=verified --no-update
+          extra_args: --results=verified
