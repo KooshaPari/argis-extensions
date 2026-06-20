@@ -10,7 +10,10 @@ import (
 
 // estimateTokens estimates tokens in a message
 func (cf *ContextFolding) estimateTokens(msg *schemas.ChatMessage) int {
-	return len(msg.Content) / 4
+	if msg.Content == nil || msg.Content.ContentStr == nil {
+		return 0
+	}
+	return len(*msg.Content.ContentStr) / 4
 }
 
 // messagesToText converts messages to plain text
@@ -19,7 +22,9 @@ func (cf *ContextFolding) messagesToText(messages []schemas.ChatMessage) string 
 	for _, msg := range messages {
 		sb.WriteString(string(msg.Role))
 		sb.WriteString(": ")
-		sb.WriteString(msg.Content)
+		if msg.Content != nil && msg.Content.ContentStr != nil {
+			sb.WriteString(*msg.Content.ContentStr)
+		}
 		sb.WriteString("\n\n")
 	}
 	return sb.String()
@@ -31,18 +36,29 @@ func (cf *ContextFolding) summarizeResponse(ctx context.Context, resp *schemas.B
 	if cf.slmClients == nil || cf.slmClients.Summarizer == nil {
 		return
 	}
-	if resp == nil || resp.ChatResponse == nil {
+	if resp == nil || resp.ChatResponse == nil || len(resp.ChatResponse.Choices) == 0 {
 		return
 	}
-	
-	// Get the content from the response
-	content := resp.ChatResponse.Content
-	if content == "" {
+
+	// v1.5.21: ChatResponse no longer has a top-level Content field.
+	// Walk Choices[*].ChatNonStreamResponseChoice.Message.Content.ContentStr.
+	var content strings.Builder
+	for _, choice := range resp.ChatResponse.Choices {
+		if choice.ChatNonStreamResponseChoice == nil || choice.ChatNonStreamResponseChoice.Message == nil {
+			continue
+		}
+		c := choice.ChatNonStreamResponseChoice.Message.Content
+		if c == nil || c.ContentStr == nil {
+			continue
+		}
+		content.WriteString(*c.ContentStr)
+	}
+	if content.Len() == 0 {
 		return
 	}
 
 	cf.slmClients.Summarize(ctx, &slm.SummarizeRequest{
-		Text: content,
+		Text: content.String(),
 		Mode: "response",
 	})
 }

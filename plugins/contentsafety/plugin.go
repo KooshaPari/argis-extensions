@@ -4,6 +4,7 @@ package contentsafety
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/maximhq/bifrost/core/schemas"
@@ -149,7 +150,7 @@ func (csp *ContentSafetyPlugin) PreHook(
 		return nil, &schemas.PluginShortCircuit{
 			Error: &schemas.BifrostError{
 				StatusCode: &statusCode,
-				Err: &schemas.ErrorField{
+				Error: &schemas.ErrorField{
 					Message: errMsg,
 				},
 			},
@@ -210,10 +211,12 @@ const contentAnalysisKey contextKey = "content_analysis"
 
 // extractRequestText extracts text from a Bifrost request
 func extractRequestText(req *schemas.BifrostRequest) string {
-	if req.ChatRequest != nil && len(req.ChatRequest.Messages) > 0 {
+	if req.ChatRequest != nil && len(req.ChatRequest.Input) > 0 {
 		var text string
-		for _, msg := range req.ChatRequest.Messages {
-			text += msg.Content + " "
+		for _, msg := range req.ChatRequest.Input {
+			if msg.Content != nil && msg.Content.ContentStr != nil {
+				text += *msg.Content.ContentStr + " "
+			}
 		}
 		return text
 	}
@@ -222,9 +225,21 @@ func extractRequestText(req *schemas.BifrostRequest) string {
 
 // extractResponseText extracts text from a Bifrost response
 func extractResponseText(resp *schemas.BifrostResponse) string {
-	if resp.ChatResponse != nil && resp.ChatResponse.Content != "" {
-		return resp.ChatResponse.Content
+	if resp.ChatResponse == nil || len(resp.ChatResponse.Choices) == 0 {
+		return ""
 	}
-	return ""
+	var b strings.Builder
+	for _, choice := range resp.ChatResponse.Choices {
+		if choice.ChatNonStreamResponseChoice == nil || choice.ChatNonStreamResponseChoice.Message == nil {
+			continue
+		}
+		c := choice.ChatNonStreamResponseChoice.Message.Content
+		if c == nil || c.ContentStr == nil {
+			continue
+		}
+		b.WriteString(*c.ContentStr)
+		b.WriteString(" ")
+	}
+	return strings.TrimSpace(b.String())
 }
 

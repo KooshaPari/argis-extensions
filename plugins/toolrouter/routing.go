@@ -21,16 +21,11 @@ func (tr *ToolRouter) filterTools(
 	req *schemas.BifrostRequest,
 	profile slm.ToolProfile,
 ) *schemas.BifrostRequest {
-	// Check if tools are in Params
-	toolsRaw, ok := req.Params["tools"]
-	if !ok || toolsRaw == nil {
+	// v1.5.21: tools live on req.ChatRequest.Params.Tools (not req.Params map[string]any).
+	if req.ChatRequest == nil || req.ChatRequest.Params == nil || len(req.ChatRequest.Params.Tools) == 0 {
 		return req
 	}
-
-	tools, ok := toolsRaw.([]schemas.ChatTool)
-	if !ok || len(tools) == 0 {
-		return req
-	}
+	tools := req.ChatRequest.Params.Tools
 
 	// If no profile, try to get one from SLM
 	if len(profile.Preferred) == 0 && tr.slmClients != nil {
@@ -47,12 +42,12 @@ func (tr *ToolRouter) filterTools(
 
 	// Create modified request - copy and update
 	modifiedReq := *req
-	newParams := make(map[string]interface{})
-	for k, v := range req.Params {
-		newParams[k] = v
+	if modifiedReq.ChatRequest != nil {
+		if modifiedReq.ChatRequest.Params == nil {
+			modifiedReq.ChatRequest.Params = &schemas.ChatParameters{}
+		}
+		modifiedReq.ChatRequest.Params.Tools = filteredTools
 	}
-	newParams["tools"] = filteredTools
-	modifiedReq.Params = newParams
 
 	return &modifiedReq
 }
@@ -65,24 +60,23 @@ func (tr *ToolRouter) classifyTools(ctx context.Context, req *schemas.BifrostReq
 
 	// Build tool names list
 	var toolNames []string
-	toolsRaw, ok := req.Params["tools"]
-	if ok {
-		if tools, ok := toolsRaw.([]schemas.ChatTool); ok {
-			for _, tool := range tools {
-				if tool.Function.Name != "" {
-					toolNames = append(toolNames, tool.Function.Name)
-				}
+	if req.ChatRequest != nil && req.ChatRequest.Params != nil {
+		for _, tool := range req.ChatRequest.Params.Tools {
+			if tool.Function.Name != "" {
+				toolNames = append(toolNames, tool.Function.Name)
 			}
 		}
 	}
 
 	// Get last user message for context
 	var userMessage string
-	if req.ChatRequest != nil && len(req.ChatRequest.Messages) > 0 {
-		for i := len(req.ChatRequest.Messages) - 1; i >= 0; i-- {
-			msg := req.ChatRequest.Messages[i]
-			if msg.Role == "user" {
-				userMessage = msg.Content
+	if req.ChatRequest != nil && len(req.ChatRequest.Input) > 0 {
+		for i := len(req.ChatRequest.Input) - 1; i >= 0; i-- {
+			msg := req.ChatRequest.Input[i]
+			if msg.Role == schemas.ChatMessageRoleUser {
+				if msg.Content != nil && msg.Content.ContentStr != nil {
+					userMessage = *msg.Content.ContentStr
+				}
 				break
 			}
 		}

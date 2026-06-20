@@ -149,16 +149,18 @@ type VoyageUsage struct {
 }
 
 // handleEmbedding performs the embedding request to VoyageAI
-func (p *VoyagePlugin) handleEmbedding(ctx context.Context, req *schemas.EmbeddingRequest) (*schemas.EmbeddingResponse, *schemas.BifrostError) {
+func (p *VoyagePlugin) handleEmbedding(ctx context.Context, req *schemas.BifrostEmbeddingRequest) (*schemas.BifrostEmbeddingResponse, *schemas.BifrostError) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	// Get input texts from the request
+	// Get input texts from the request (v1.5.21: req.Input is *EmbeddingInput)
 	var inputs []string
-	if req.Texts != nil && len(req.Texts) > 0 {
-		inputs = req.Texts
-	} else if req.Input != "" {
-		inputs = []string{req.Input}
+	if req.Input != nil {
+		if len(req.Input.Texts) > 0 {
+			inputs = req.Input.Texts
+		} else if req.Input.Text != nil && *req.Input.Text != "" {
+			inputs = []string{*req.Input.Text}
+		}
 	}
 	if len(inputs) == 0 {
 		return nil, makeBifrostError(http.StatusBadRequest, "No input provided for embedding")
@@ -177,8 +179,8 @@ func (p *VoyagePlugin) handleEmbedding(ctx context.Context, req *schemas.Embeddi
 			voyageReq.InputType = inputType
 		}
 	}
-	if req.Params != nil && req.Params.Dimensions > 0 {
-		dims := req.Params.Dimensions
+	if req.Params != nil && req.Params.Dimensions != nil && *req.Params.Dimensions > 0 {
+		dims := *req.Params.Dimensions
 		voyageReq.OutputDimension = &dims
 	}
 
@@ -217,20 +219,25 @@ func (p *VoyagePlugin) handleEmbedding(ctx context.Context, req *schemas.Embeddi
 	}
 
 // Convert to Bifrost format
-	bifrostResp := &schemas.EmbeddingResponse{
+	bifrostResp := &schemas.BifrostEmbeddingResponse{
 		Object: voyageResp.Object,
 		Model:  voyageResp.Model,
 		Data:   make([]schemas.EmbeddingData, len(voyageResp.Data)),
-		Usage: schemas.Usage{
+		Usage: &schemas.BifrostLLMUsage{
 			TotalTokens: voyageResp.Usage.TotalTokens,
 		},
 	}
 
 	for i, emb := range voyageResp.Data {
+		// Convert []float32 -> []float64 for v1.5.21 EmbeddingStruct.EmbeddingArray
+		arr := make([]float64, len(emb.Embedding))
+		for j, v := range emb.Embedding {
+			arr[j] = float64(v)
+		}
 		bifrostResp.Data[i] = schemas.EmbeddingData{
-			Object: emb.Object,
-			Index:  emb.Index,
-			Embedding: emb.Embedding,
+			Object:    emb.Object,
+			Index:     emb.Index,
+			Embedding: schemas.EmbeddingStruct{EmbeddingArray: arr},
 		}
 	}
 
@@ -240,8 +247,7 @@ func (p *VoyagePlugin) handleEmbedding(ctx context.Context, req *schemas.Embeddi
 func makeBifrostError(statusCode int, message string) *schemas.BifrostError {
 	return &schemas.BifrostError{
 		StatusCode: &statusCode,
-		Message:    message,
-		Err: &schemas.ErrorField{
+		Error: &schemas.ErrorField{
 			Message: message,
 		},
 	}
@@ -253,22 +259,23 @@ func (p *VoyagePlugin) Embed(ctx context.Context, text string, model string) ([]
 		model = Voyage35Lite
 	}
 
-	req := &schemas.EmbeddingRequest{
+	textCopy := text
+	req := &schemas.BifrostEmbeddingRequest{
 		Provider: schemas.ModelProvider(ProviderKey),
 		Model:    model,
-		Input:    text,
+		Input:    &schemas.EmbeddingInput{Text: &textCopy},
 	}
 
 	resp, bifrostErr := p.handleEmbedding(ctx, req)
 	if bifrostErr != nil {
-		return nil, fmt.Errorf("embedding failed: %s", bifrostErr.Message)
+		return nil, fmt.Errorf("embedding failed: %s", bifrostErr.Error.Message)
 	}
 
 	if len(resp.Data) == 0 {
 		return nil, fmt.Errorf("no embeddings returned")
 	}
 
-	return resp.Data[0].Embedding, nil
+	return embeddingArrayAsFloat32(resp.Data[0].Embedding), nil
 }
 
 // EmbedBatch embeds multiple texts in a single request
@@ -277,21 +284,30 @@ func (p *VoyagePlugin) EmbedBatch(ctx context.Context, texts []string, model str
 		model = Voyage35Lite
 	}
 
-	req := &schemas.EmbeddingRequest{
+	req := &schemas.BifrostEmbeddingRequest{
 		Provider: schemas.ModelProvider(ProviderKey),
 		Model:    model,
-		Texts:    texts,
+		Input:    &schemas.EmbeddingInput{Texts: texts},
 	}
 
 	resp, bifrostErr := p.handleEmbedding(ctx, req)
 	if bifrostErr != nil {
-		return nil, fmt.Errorf("batch embedding failed: %s", bifrostErr.Message)
+		return nil, fmt.Errorf("batch embedding failed: %s", bifrostErr.Error.Message)
 	}
 
 	embeddings := make([][]float32, len(resp.Data))
 	for i, data := range resp.Data {
-		embeddings[i] = data.Embedding
+		embeddings[i] = embeddingArrayAsFloat32(data.Embedding)
 	}
 
 	return embeddings, nil
+}
+
+// embeddingArrayAsFloat32 extracts []float64 from an EmbeddingStruct and converts to []float32
+func embeddingArrayAsFloat32(es schemas.EmbeddingStruct) []float32 {
+	out := make([]float32, len(es.EmbeddingArray))
+	for i, v := range es.EmbeddingArray {
+		out[i] = float32(v)
+	}
+	return out
 }

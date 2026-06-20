@@ -7,28 +7,29 @@ import (
 	"github.com/maximhq/bifrost/core/schemas"
 )
 
-// toChatMessages converts []schemas.Message to []schemas.ChatMessage
-func toChatMessages(messages []schemas.Message) []schemas.ChatMessage {
+// toChatMessages converts []schemas.ChatMessage (alias) to []schemas.ChatMessage
+// v1.5.21 unified the v1.2.30 Message and ChatMessage types; this is now a copy helper
+// that normalizes ContentStr pointers (allocating a fresh string for safety).
+func toChatMessages(messages []schemas.ChatMessage) []schemas.ChatMessage {
 	result := make([]schemas.ChatMessage, len(messages))
 	for i, msg := range messages {
+		var contentPtr *string
+		if msg.Content != nil && msg.Content.ContentStr != nil {
+			s := *msg.Content.ContentStr
+			contentPtr = &s
+		}
 		result[i] = schemas.ChatMessage{
 			Role:    msg.Role,
-			Content: msg.Content,
+			Content: &schemas.ChatMessageContent{ContentStr: contentPtr},
 		}
 	}
 	return result
 }
 
-// toMessages converts []schemas.ChatMessage to []schemas.Message
-func toMessages(messages []schemas.ChatMessage) []schemas.Message {
-	result := make([]schemas.Message, len(messages))
-	for i, msg := range messages {
-		result[i] = schemas.Message{
-			Role:    msg.Role,
-			Content: msg.Content,
-		}
-	}
-	return result
+// toMessages converts []schemas.ChatMessage to []schemas.ChatMessage (kept for API parity)
+// v1.5.21: Message type was merged into ChatMessage; this is now an identity-like copy.
+func toMessages(messages []schemas.ChatMessage) []schemas.ChatMessage {
+	return toChatMessages(messages)
 }
 
 // getStrategy determines the context strategy to use
@@ -47,10 +48,14 @@ func (cf *ContextFolding) calculateBudget(req *schemas.BifrostRequest) int {
 	budget -= cf.config.SystemPromptTokens
 
 	// Subtract current message tokens
-	if req.ChatRequest != nil && len(req.ChatRequest.Messages) > 0 {
-		for _, msg := range req.ChatRequest.Messages {
+	if req.ChatRequest != nil && len(req.ChatRequest.Input) > 0 {
+		for _, msg := range req.ChatRequest.Input {
 			// Rough token estimate: ~4 chars per token
-			budget -= len(msg.Content) / 4
+			contentLen := 0
+			if msg.Content != nil && msg.Content.ContentStr != nil {
+				contentLen = len(*msg.Content.ContentStr)
+			}
+			budget -= contentLen / 4
 		}
 	}
 
@@ -67,7 +72,7 @@ func (cf *ContextFolding) foldContext(
 	strategy ContextStrategy,
 	budget int,
 ) *schemas.BifrostRequest {
-	if req.ChatRequest == nil || len(req.ChatRequest.Messages) == 0 {
+	if req.ChatRequest == nil || len(req.ChatRequest.Input) == 0 {
 		return req
 	}
 
@@ -76,33 +81,33 @@ func (cf *ContextFolding) foldContext(
 	switch strategy {
 	case StrategyRawOnly:
 		// Keep all messages as-is, truncate if needed
-		messages = cf.truncateToFit(req.ChatRequest.Messages, budget)
+		messages = cf.truncateToFit(req.ChatRequest.Input, budget)
 
 	case StrategyShortSummary:
 		// Summarize old messages, keep recent raw
-		messages = cf.summarizeOld(ctx, req.ChatRequest.Messages, budget, "short")
+		messages = cf.summarizeOld(ctx, req.ChatRequest.Input, budget, "short")
 
 	case StrategyMediumSummary:
-		messages = cf.summarizeOld(ctx, req.ChatRequest.Messages, budget, "medium")
+		messages = cf.summarizeOld(ctx, req.ChatRequest.Input, budget, "medium")
 
 	case StrategyFullSummary:
-		messages = cf.summarizeOld(ctx, req.ChatRequest.Messages, budget, "long")
+		messages = cf.summarizeOld(ctx, req.ChatRequest.Input, budget, "long")
 
 	case StrategyMediumWithRawOnDemand:
 		// Use medium summaries but keep raw for important messages
-		messages = cf.adaptiveFold(ctx, req.ChatRequest.Messages, budget)
+		messages = cf.adaptiveFold(ctx, req.ChatRequest.Input, budget)
 
 	case StrategyAdaptive:
 		// Dynamically choose based on content
-		messages = cf.adaptiveFold(ctx, req.ChatRequest.Messages, budget)
+		messages = cf.adaptiveFold(ctx, req.ChatRequest.Input, budget)
 
 	default:
-		messages = req.ChatRequest.Messages
+		messages = req.ChatRequest.Input
 	}
 
 	// Copy and update request
 	newChatReq := *req.ChatRequest
-	newChatReq.Messages = messages
+	newChatReq.Input = messages
 	modifiedReq.ChatRequest = &newChatReq
 
 	return &modifiedReq
@@ -162,8 +167,8 @@ func (cf *ContextFolding) summarizeOld(
 		}); err == nil {
 			content := "[Previous conversation summary]\n" + resp.Summary
 			summaryMsg = &schemas.ChatMessage{
-				Role:    string(schemas.ChatMessageRoleSystem),
-				Content: content,
+				Role:    schemas.ChatMessageRoleSystem,
+				Content: &schemas.ChatMessageContent{ContentStr: &content},
 			}
 		}
 	}

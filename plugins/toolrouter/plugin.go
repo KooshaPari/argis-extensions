@@ -95,12 +95,8 @@ func (tr *ToolRouter) PreHook(
 	defer tr.mu.RUnlock()
 
 	// Skip if no tools in request
-	toolsRaw, ok := req.Params["tools"]
-	if !ok || toolsRaw == nil {
-		return req, nil, nil
-	}
-	tools, ok := toolsRaw.([]schemas.ChatTool)
-	if !ok || len(tools) == 0 {
+	// v1.5.21: tools live on req.ChatRequest.Params.Tools (not req.Params map[string]any).
+	if req.ChatRequest == nil || req.ChatRequest.Params == nil || len(req.ChatRequest.Params.Tools) == 0 {
 		return req, nil, nil
 	}
 

@@ -136,23 +136,24 @@ func (sr *SemanticRouter) GetFallbackModels(taskType TaskType) []string {
 func (ir *IntelligentRouter) extractFeatures(req *schemas.BifrostRequest) FeatureSet {
 	features := FeatureSet{}
 
-	// Check for tool/function calling in chat requests
-	toolsRaw, ok := req.Params["tools"]
-	if ok {
-		if tools, ok := toolsRaw.([]schemas.ChatTool); ok && len(tools) > 0 {
+	// v1.5.21: tools/tool_choice live on req.ChatRequest.Params (not req.Params map[string]any).
+	if req.ChatRequest != nil && req.ChatRequest.Params != nil {
+		if len(req.ChatRequest.Params.Tools) > 0 {
 			features.HasTools = true
 		}
-	}
-	toolChoiceRaw, ok := req.Params["tool_choice"]
-	if ok && toolChoiceRaw != nil {
-		features.HasToolChoice = true
+		if req.ChatRequest.Params.ToolChoice != nil {
+			features.HasToolChoice = true
+		}
 	}
 
 	// Analyze message content from chat requests
-	if req.ChatRequest != nil && len(req.ChatRequest.Messages) > 0 {
-		features.MessageCount = len(req.ChatRequest.Messages)
-		for _, msg := range req.ChatRequest.Messages {
-			content := msg.Content
+	if req.ChatRequest != nil && len(req.ChatRequest.Input) > 0 {
+		features.MessageCount = len(req.ChatRequest.Input)
+		for _, msg := range req.ChatRequest.Input {
+			content := ""
+			if msg.Content != nil && msg.Content.ContentStr != nil {
+				content = *msg.Content.ContentStr
+			}
 			// Check for code markers
 			if strings.Contains(content, "```") ||
 				strings.Contains(content, "func ") ||

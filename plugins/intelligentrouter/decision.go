@@ -205,7 +205,8 @@ func (ir *IntelligentRouter) applyDecision(req *schemas.BifrostRequest, decision
 	// Clone request and update model/provider using the proper methods
 	modifiedReq := *req
 	modifiedReq.SetModel(decision.SelectedModel)
-	modifiedReq.SetProvider(string(decision.SelectedProvider))
+	// v1.5.21: SetProvider takes a ModelProvider, not a string. SelectedProvider is already a ModelProvider.
+	modifiedReq.SetProvider(decision.SelectedProvider)
 
 	return &modifiedReq
 }
@@ -213,18 +214,25 @@ func (ir *IntelligentRouter) applyDecision(req *schemas.BifrostRequest, decision
 // extractPrompt extracts the prompt string from a request
 func extractPrompt(req *schemas.BifrostRequest) string {
 	// Handle chat requests
-	if req.ChatRequest != nil && len(req.ChatRequest.Messages) > 0 {
+	if req.ChatRequest != nil && len(req.ChatRequest.Input) > 0 {
 		var sb strings.Builder
-		for _, msg := range req.ChatRequest.Messages {
-			sb.WriteString(msg.Content)
+		for _, msg := range req.ChatRequest.Input {
+			if msg.Content != nil && msg.Content.ContentStr != nil {
+				sb.WriteString(*msg.Content.ContentStr)
+			}
 			sb.WriteString(" ")
 		}
 		return strings.TrimSpace(sb.String())
 	}
 
-	// Handle text completion requests - Input is a string
-	if textReq := req.TextCompletionRequest(); textReq != nil && textReq.Input != "" {
-		return textReq.Input
+	// Handle text completion requests - Input is *TextCompletionInput in v1.5.21
+	if textReq := req.TextCompletionRequest; textReq != nil && textReq.Input != nil {
+		if textReq.Input.PromptStr != nil {
+			return *textReq.Input.PromptStr
+		}
+		if len(textReq.Input.PromptArray) > 0 {
+			return strings.Join(textReq.Input.PromptArray, " ")
+		}
 	}
 
 	return ""
@@ -236,8 +244,8 @@ func (ir *IntelligentRouter) logDecisionOutcome(decision *RoutingDecision, resp 
 	var latencyMs, costUSD float64
 	var tokensIn, tokensOut int
 
-	// Extract metrics from response - ChatResponse.Usage is a struct, not a pointer
-	if resp != nil && resp.ChatResponse != nil {
+	// Extract metrics from response - v1.5.21: ChatResponse.Usage is *BifrostLLMUsage (pointer)
+	if resp != nil && resp.ChatResponse != nil && resp.ChatResponse.Usage != nil {
 		tokensIn = resp.ChatResponse.Usage.PromptTokens
 		tokensOut = resp.ChatResponse.Usage.CompletionTokens
 	}
