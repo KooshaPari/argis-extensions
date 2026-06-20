@@ -1,3 +1,6 @@
+//go:build ignore
+// +build ignore
+
 // phenotype-router decision flow skeleton (ADR-050 Option B)
 // 2026-06-20 — reference implementation, syntax-only (no external deps).
 package router

@@ -1,3 +1,6 @@
+//go:build ignore
+// +build ignore
+
 // phenotype-router decision flow tests (ADR-050 Option B)
 // 2026-06-20 — syntax-only reference tests for the decision flow skeleton.
 package router

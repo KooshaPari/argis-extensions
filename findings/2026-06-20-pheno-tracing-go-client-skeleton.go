@@ -1,3 +1,6 @@
+//go:build ignore
+// +build ignore
+
 // Package tracing wires the OpenTelemetry OTLP/HTTP exporter for the
 // phenotype-router Go service.
 //
