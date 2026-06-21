@@ -129,3 +129,11 @@ The repo runs [`pre-commit`](https://pre-commit.com/) on every commit. The V16-T
 
 Install with `pre-commit install`; bypass with `git commit --no-verify`. See `.pre-commit-config.yaml` for the full hook list.
 
+
+## Secret scanning
+
+detect-secrets runs in CI as a pre-commit + gate; the baseline file is
+.secrets.baseline and detect-secrets-hook is wired in .pre-commit-config.yaml
+via the Yelp repo at v1.5.0. New findings not present in the baseline fail the
+gate; legitimate hits are added with detect-secrets scan --update
+.secrets.baseline and reviewed in the PR.
