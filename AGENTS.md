@@ -179,6 +179,24 @@ See `plans/2026-06-20-v12-71-pillar-p0-remediation.md` (the working plan) and `p
 - **T12-Wrap (v12): closure report + ADR-076 + AGENTS.md refresh** (P0, ~10 min) — DONE. `findings/2026-06-20-v12-closure-report.md` + `docs/adr/2026-06-20/ADR-076-v12-closure.md` + this file.
 - **§8: Router architecture decision** (P0) — **ACCEPTED 2026-06-20** (Option B: Bifrost-as-library + Phenotype-owned decision layer per ADR-050 + ADR-051). Next wave (v13) unblocks L1 (Bifrost `v1.5.21` pin + 9-plugin regression) and L2 (`phenotype-router` v0.1.0). 6.5-week critical path.
 
+### v12 closure — router spike details (T24, 2026-06-21)
+
+Retrospective expansion of the §8 router-architecture acceptance above, written the day after closure (2026-06-21):
+
+- **Router spike complete**: 11 `.go` files landed under the spike package; 5 tests passing.
+- **3 ADRs written**: ADR-050, ADR-051, ADR-052 (architecture, federation interface, router implementation shape respectively).
+- **6 plugins ported** (of 15 total in the Bifrost regression set); 9 plugin ports remaining for downstream waves (3 scheduled for v13, the remainder split across v14+).
+- **PR #55 OTel merged** — router spike instrumented with OTLP export via `pheno-tracing` (ADR-012 / ADR-036B).
+- **PR #783 hygiene merged** — gofmt + golangci-lint + go mod tidy + license-header sweep across the spike.
+- **argis PR #108 created** — cross-repo coordination PR pinning the spike to `KooshaPari/argis` for downstream consumers.
+
+### v13 outlook (cycle 3, 2026-06-22 target)
+
+- **Production repo bootstrap**: `phenotype-router` — the canonical home for the Phenotype-owned decision layer per ADR-050 + ADR-051 + ADR-052. Carve-out from the spike repo, 80 % lib coverage gate per ADR-040, full substrate quality bar per ADR-042B.
+- **Remaining 3 plugin ports** to complete the v13 slice of the 9-plugin Bifrost regression (the other 6 roll into v14+).
+- **Security audit**: per ADR-042 monthly cadence, scoped to the `phenotype-router` substrate — `govulncheck` for the Go module, plus dependency-pin review on the Bifrost `v1.5.21` reference.
+- **Performance benchmarks**: per ADR-040 — router e2e (request → decision → plugin dispatch) + p95 latency under sustained load (1k RPS, 30 min soak), benchmark harness co-located with the spike artifacts.
+
 ---
 
 ## Conventions
