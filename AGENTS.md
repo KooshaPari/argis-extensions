@@ -225,11 +225,12 @@ The MacBook is **not** a heavy-work device. Heavy work is defined as anything th
 | :----------- | :------------- | :------------------------------------------------------------------------------------------------------ |
 | `Civis`      | **ACTIVE**     | Any. Full SWE process.                                                                                  |
 | `focalpoint` | **PAUSED**     | Read-only. The prior AGENTS.md template is shelved.                                                     |
-| `Dino`       | **CONDITIONAL** | Engine / non-frontend only (heavy visual engine, asset pipeline, deterministic sim). No UI / HUD / UX work right now. |
+| `Dino`       | **PAUSED**     | Read-only. Engine / non-frontend work paused; no UI / HUD / UX in scope.                                                                    |
 | `WSM`        | **CONDITIONAL** | None right now. Re-evaluate when an active consumer appears.                                            |
 | `QuadSGM`    | **PAUSED**     | Read-only.                                                                                              |
 | `AtomsBot*`  | **PAUSED (capstone)** | Read-only as a *target* of new work. **May be legally mined** (code, concepts, schema, docs, tests) — capstone project's sponsor is not in good standing; the public repo is fair-game reference material. |
-| `HwLedger` + every other app-level repo not in this list | **RECLASSIFY** (default PAUSED) | Underlying parts to be moved to one of `pheno-*-lib` / `phenotype-*-sdk` / `phenotype-*-framework` / federated service per Rule 3 below. |
+| `HwLedger`   | **CONDITIONAL** | Federated service bookkeeping + `pheno-capacity` math extraction in progress (per ADR-035 L5-105). Math lib extraction is the active thread; underlying ledger kept stable. |
+| Every other app-level repo not in this list | **RECLASSIFY** (default PAUSED) | Underlying parts to be moved to one of `pheno-*-lib` / `phenotype-*-sdk` / `phenotype-*-framework` / federated service per Rule 3 below. |
 
 A new repo defaults to **PAUSED** until it is added to this table with a bucket. A bucket change requires a one-line worklog entry (`bucket_change: from=... to=... reason=...`).
 
@@ -298,7 +299,6 @@ Re-evaluate after all non-app fleet work (config, tracing, MCP-router, observabi
 | `focalpoint`   | PAUSED                              | `KooshaPari/FocalPoint:main` @ `3ae2f126` (1 commit ahead)                         |
 | `Dino`         | PAUSED (was CONDITIONAL)            | (no unpushed)                                                                     |
 | `QuadSGM`      | PAUSED                              | `KooshaPari/QuadSGM:wip/2026-06-17-pre-pause-snapshot` @ `484dfa1`                 |
-| `HwLedger`     | PAUSED (default per ADR-023 Rule 3) | `KooshaPari/HwLedger:wip/2026-06-17-cleanup-hwLedger` @ `f031f36`                  |
 | `WSM`          | PAUSED (was CONDITIONAL)            | (does not exist locally)                                                          |
 | `*fitness*`    | PAUSED (ripped)                     | n/a                                                                               |
 
