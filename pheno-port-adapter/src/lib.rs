@@ -26,6 +26,12 @@
 //! follow-up (v13+) so we don't blanket-spam traces for high-QPS cache
 //! paths.
 
+//! #![doc = "Promote to deny once cycle-3 doc audit confirms 0 missing-doc warnings."]
+
+#![deny(missing_docs)]
+#![deny(unsafe_code)]
+#![deny(rust_2018_idioms)]
+
 use thiserror::Error;
 
 /// Error type for transport-level [`PortAdapter`] operations.
