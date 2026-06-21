@@ -52,6 +52,22 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  cargo-deps-graph:
+    name: cargo-deps SVG (L3 pillar, v14 T1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Generate intra-crate deps SVG
+        run: bash scripts/cargo-deps-graph.sh pheno-port-adapter
+      - name: Upload deps-graph SVG
+        uses: actions/upload-artifact@v4
+        with:
+          name: pheno-port-adapter-deps-graph
+          path: pheno-port-adapter/target/deps-graph.svg
+          if-no-files-found: warn
+
   coverage:
     name: coverage (llvm-cov)
     runs-on: ubuntu-latest

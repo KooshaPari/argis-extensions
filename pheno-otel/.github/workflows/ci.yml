@@ -87,6 +87,24 @@ jobs:
       - run: cargo build --locked --all-features
       - run: cargo test --locked --all-features
 
+  cargo-deps-graph:
+    name: cargo-deps SVG (L3 pillar, v14 T1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@e3f78fd1f6c2a43286e5ef3a13eea2e72ed23e1f # stable
+        with:
+          toolchain: stable
+      - name: Generate intra-crate deps SVG
+        run: bash scripts/cargo-deps-graph.sh pheno-otel
+      - name: Upload deps-graph SVG
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pheno-otel-deps-graph
+          path: pheno-otel/target/deps-graph.svg
+          if-no-files-found: warn
+
   coverage:
     name: Coverage (cargo-llvm-cov)
     runs-on: ubuntu-latest
