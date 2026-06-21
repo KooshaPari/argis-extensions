@@ -64,6 +64,8 @@
 //! assert_eq!(keys, vec![&"alpha".to_string(), &"zeta".to_string()]);
 //! ```
 
+#![warn(missing_docs)]
+
 use std::collections::{BTreeMap, HashMap};
 
 use thiserror::Error;
