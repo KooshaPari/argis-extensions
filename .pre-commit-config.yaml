@@ -76,3 +76,27 @@ repos:
         language: system
         stages: [commit-msg]
         additional_dependencies: ["@commitlint/cli@^19.0.0", "@commitlint/config-conventional@^19.0.0"]
+
+  # V16-T5 (2026-06-21): branch-protection + merge-hygiene advisory hooks.
+  # no-commit-to-branch protects main + release/* (gate).
+  # no-merge-commits is warn-only (manual stage -> only runs via CI advisory).
+  # check-merge-conflict catches unresolved conflict markers before commit.
+  # check-yaml validates YAML syntax repo-wide.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: no-commit-to-branch
+        name: no-commit-to-branch (protect main, release/*)
+        description: Block commits directly to main or release/* branches
+        args: ['--branch=main', '--branch=release/*']
+      - id: no-merge-commits
+        name: no-merge-commits (warn-only, v16-T5)
+        description: Warn when merge commits are introduced (advisory only; manual stage)
+        stages: [manual]
+      - id: check-merge-conflict
+        name: check-merge-conflict (v16-T5)
+        description: Detect unresolved merge conflict markers before commit
+      - id: check-yaml
+        name: check-yaml (v16-T5)
+        description: Validate YAML syntax across the repo
+        exclude: ^(\.pre-commit-config\.yaml|templates/.*)$
