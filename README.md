@@ -116,3 +116,16 @@ See [docs/guides/TESTING.md](docs/guides/TESTING.md) for testing procedures.
 
 See LICENSE file for details.
 
+## Pre-commit hooks
+
+The repo runs [`pre-commit`](https://pre-commit.com/) on every commit. The V16-T5 cycle adds branch-protection and merge-hygiene hooks (`pre-commit/pre-commit-hooks` v5.0.0):
+
+| Hook | Stage | Purpose |
+|---|---|---|
+| `no-commit-to-branch` | pre-commit | Blocks direct commits to `main` and `release/*` branches |
+| `no-merge-commits` | manual | Warn-only advisory: flags merge commits (CI runs this with `--hook-stage manual`) |
+| `check-merge-conflict` | pre-commit | Catches unresolved `<<<<<<<` / `=======` / `>>>>>>>` markers before commit |
+| `check-yaml` | pre-commit | Validates YAML syntax across the repo (excludes `.pre-commit-config.yaml` + `templates/`) |
+
+Install with `pre-commit install`; bypass with `git commit --no-verify`. See `.pre-commit-config.yaml` for the full hook list.
+

@@ -36,3 +36,16 @@ jobs:
   phenotype-validate:
     runs-on: ubuntu-latest
     uses: KooshaPari/phenotype-ops/.github/workflows/manifest-gate.yml@main
+
+  # v16-T5: pre-commit advisory (manual stage, non-gating). Runs `pre-commit run --all-files --hook-stage manual` with `continue-on-error: true` — never blocks CI.
+  pre-commit-advisory:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run pre-commit advisory (v16-T5)
+        run: pip install --quiet pre-commit && pre-commit run --all-files --hook-stage manual
+        continue-on-error: true
