@@ -97,6 +97,17 @@ pub mod propagation;
 /// cardinality. See [`histogram::LatencyHistogram`].
 pub mod histogram;
 
+/// L25 — fleet-wide OTLP metrics facade (Counter / Histogram / Gauge).
+///
+/// See [`metrics::Metrics`]. Sibling to [`histogram`]: the
+/// latency histogram is the dedicated latency instrument with full
+/// bucket breakdown (p50/p95/p99); the metrics facade covers the
+/// generic counter / gauge / distribution surface with a uniform
+/// (route × status) label grid and a stable JSON snapshot for OTLP
+/// export. Per ADR-037 (pheno-otel substrate canonical) + ADR-042B
+/// (substrate quality bar).
+pub mod metrics;
+
 /// Build an OTel `service.name`-flavored `ExportHandle` for tests.
 pub fn test_handle(endpoint: &str) -> ExportHandle {
     ExportHandle {
