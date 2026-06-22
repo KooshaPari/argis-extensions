@@ -15,6 +15,8 @@
 use std::net::TcpStream;
 use std::sync::Mutex;
 
+use tracing::instrument;
+
 use crate::{AdapterError, Connection, PortAdapter};
 
 /// TCP transport adapter backed by a single [`TcpStream`].
@@ -66,6 +68,7 @@ impl PortAdapter for TcpAdapter {
         "tcp"
     }
 
+    #[instrument(level = "debug", skip(self), fields(adapter = "tcp"))]
     fn health(&self) -> Result<(), AdapterError> {
         let state = self.inner.lock().expect("tcp adapter mutex poisoned");
         let stream = state
@@ -81,6 +84,7 @@ impl PortAdapter for TcpAdapter {
         Ok(())
     }
 
+    #[instrument(level = "debug", skip(self), fields(adapter = "tcp", endpoint))]
     fn connect(&self, endpoint: &str) -> Result<Connection, AdapterError> {
         let _ = Self::parse_endpoint(endpoint)?;
         let stream = TcpStream::connect(endpoint)
@@ -95,6 +99,7 @@ impl PortAdapter for TcpAdapter {
         })
     }
 
+    #[instrument(level = "debug", skip(self), fields(adapter = "tcp"))]
     fn disconnect(&self) -> Result<(), AdapterError> {
         let mut state = self.inner.lock().expect("tcp adapter mutex poisoned");
         // `take()` drops the inner `TcpStream`, which sends FIN to the peer.

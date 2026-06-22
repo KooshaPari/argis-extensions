@@ -28,11 +28,55 @@ redis = { version = "0.27", default-features = false, features = ["tokio-comp", 
 # collectors when wired into a wider observability stack (per
 # ADR-023 Rule 3.1: every substrate ships observability).
 pheno-otel = { path = "../pheno-otel" }
+# v20-T5 (L23): proptest is in [dependencies] (not just [dev-dependencies])
+# so the manual `Arbitrary` impls in `src/lib.rs` for `AdapterError` and
+# `Connection` compile. The proptest book requires this: a crate that
+# provides `Arbitrary` impls in src/ must have proptest as a regular
+# dep (not just a dev-dep) so the generated `impl Arbitrary` blocks can
+# reference the trait. Tests in `tests/proptest_smoke.rs` then exercise
+# these impls via `any::<T>()`.
+proptest = { version = "1.4", default-features = false, features = ["std"] }
+# v22-T1 (L25): metrics facade + `#[instrument]` tracing on hot paths.
+# `tracing` powers the `#[instrument]` attribute macro on the 5 hot-path
+# fns (TcpAdapter::{connect,disconnect,health} + InMemoryCache::get +
+# RedisAdapter::put). Pinned to the latest 0.1.x; the attribute macro is
+# stable since tracing 0.1.22 and the public API has not changed since.
+tracing = "0.1"
+# `prometheus` (0.13) is the data-model crate that `opentelemetry-prometheus`
+# (0.16) wraps. We depend on the OTLP wire-format facade and use it to
+# build a `PrometheusExporter` that renders the `prometheus::Registry`
+# snapshot into the Prometheus text exposition format. Both crates are
+# cheap, dependency-light, and stable.
+opentelemetry-prometheus = "0.16"
+prometheus = { version = "0.13", default-features = false }
 
 [dev-dependencies]
-loom = "0.7"
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-# Concurrency model checker (v14 T5: L25 pillar, cycle 3).
-# Permutation-tests shared-state data structures used in this crate's
-# public API. Stable Rust 1.82+ compatible; no nightly required.
+# SIDE-23 benchmark suite (scaffolding): 100-cycle send/recv cache
+# benchmark lives in benches/cache_cycles.rs.
+criterion = "0.8"
+# V20-T4 (L27) consumer-driven contract tests (Pact). The pact_consumer
+# crate's `mock_server` module is used to spin up an in-process HTTP
+# server that records requests and replays the configured response.
+# Pacts land in `target/pacts/<consumer>-<provider>.json` and feed
+# `scripts/can-i-deploy.sh` for can-i-deploy gating.
+pact_consumer = "1.4"
+# Sync HTTP client used to drive the real HTTP requests in the Pact
+# tests against the in-process mock cache provider. ureq is chosen
+# for its tiny dependency surface and sync API.
+ureq = { version = "2.10", default-features = false, features = ["tls"] }
+
+# V20-T4 (L27) Pact consumer contract test. The mock cache provider
+# is provided by pact_consumer's in-process mock server; the
+# explicit `[[test]]` entry keeps the contract isolated from the
+# rest of the integration suite (the `proptest_smoke.rs` and
+# `loom*` tests use the in-tree RedisAdapter and would otherwise
+# require a real Redis to be running).
+[[test]]
+name = "provider_cache_hex_port_pact"
+path = "tests/contracts/provider_cache_hex_port_pact.rs"
+
+[[bench]]
+name = "cache_cycles"
+harness = false

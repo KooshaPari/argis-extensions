@@ -9,7 +9,9 @@
 //! Consumers depend on `pheno-otel` for consistent OTLP export, batch
 //! processor behavior, and resource attribute propagation. This crate is
 //! sibling to `pheno-tracing` (ADR-036) — `pheno-tracing` produces spans,
-//! `pheno-otel` exports them.
+//! `pheno-otel` exports them. The fleet-wide latency histogram facade
+//! (L60, p50/p95/p99 with bounded cardinality) lives in
+//! [`histogram::LatencyHistogram`].
 //!
 //! # When to use
 //!
@@ -25,7 +27,7 @@
 //! - You need language-specific SDKs → use the `opentelemetry` crate family
 //!   directly (this crate is a thin fleet-port wrapper, not a full SDK).
 
-#![deny(missing_docs)]
+#![warn(missing_docs)]
 #![deny(unsafe_code)]
 #![deny(rust_2018_idioms)]
 
@@ -91,11 +93,83 @@ pub mod exporters;
 /// forward trace context across an HTTP or gRPC service boundary.
 pub mod propagation;
 
+/// L60 — fleet-wide latency histogram (p50/p95/p99) with bounded
+/// cardinality. See [`histogram::LatencyHistogram`].
+pub mod histogram;
+
+/// L25 — fleet-wide OTLP metrics facade (Counter / Histogram / Gauge).
+///
+/// See [`metrics::Metrics`]. Sibling to [`histogram`]: the
+/// latency histogram is the dedicated latency instrument with full
+/// bucket breakdown (p50/p95/p99); the metrics facade covers the
+/// generic counter / gauge / distribution surface with a uniform
+/// (route × status) label grid and a stable JSON snapshot for OTLP
+/// export. Per ADR-037 (pheno-otel substrate canonical) + ADR-042B
+/// (substrate quality bar).
+pub mod metrics;
+
 /// Build an OTel `service.name`-flavored `ExportHandle` for tests.
 pub fn test_handle(endpoint: &str) -> ExportHandle {
     ExportHandle {
         endpoint: endpoint.to_string(),
         service_name: "pheno-otel-tests".to_string(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// proptest::Arbitrary impls (v20-T5 / L23)
+// ---------------------------------------------------------------------------
+
+impl proptest::arbitrary::Arbitrary for OtlpError {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+        proptest::prop_oneof![
+            proptest::string::string_regex("[A-Za-z0-9 _\\-\\.]{1,80}")
+                .expect("otlp_error regex")
+                .prop_map(Self::SerializeFailed)
+                .boxed(),
+            proptest::string::string_regex("[A-Za-z0-9 _\\-\\.]{1,80}")
+                .expect("otlp_error regex")
+                .prop_map(Self::Transport)
+                .boxed(),
+            proptest::string::string_regex("[A-Za-z0-9 _\\-\\.]{1,80}")
+                .expect("otlp_error regex")
+                .prop_map(Self::NotConfigured)
+                .boxed(),
+            proptest::string::string_regex("[A-Za-z0-9 _\\-\\.]{1,80}")
+                .expect("otlp_error regex")
+                .prop_map(Self::InvalidAttribute)
+                .boxed(),
+            // proptest 1.11's `Just<T>` requires `T: Clone + fmt::Debug`,
+            // but `OtlpError` is intentionally not Clone (errors carry
+            // context that shouldn't be duplicated). Map a fresh unit
+            // instead — same statistical effect, no Clone bound.
+            (0..1u32).prop_map(|_| Self::NotConfigured(String::new())).boxed(),
+        ]
+        .boxed()
+    }
+}
+
+impl proptest::arbitrary::Arbitrary for ExportHandle {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+        (
+            proptest::string::string_regex("(http|https)://[A-Za-z0-9_\\-\\.]{1,32}(:[0-9]{2,5})?")
+                .expect("endpoint regex"),
+            proptest::string::string_regex("[a-z][a-z0-9_\\-]{0,32}")
+                .expect("service_name regex"),
+        )
+            .prop_map(|(endpoint, service_name)| ExportHandle {
+                endpoint,
+                service_name,
+            })
+            .boxed()
     }
 }
 
