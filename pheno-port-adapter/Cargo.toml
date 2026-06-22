@@ -36,6 +36,19 @@ pheno-otel = { path = "../pheno-otel" }
 # reference the trait. Tests in `tests/proptest_smoke.rs` then exercise
 # these impls via `any::<T>()`.
 proptest = { version = "1.4", default-features = false, features = ["std"] }
+# v22-T1 (L25): metrics facade + `#[instrument]` tracing on hot paths.
+# `tracing` powers the `#[instrument]` attribute macro on the 5 hot-path
+# fns (TcpAdapter::{connect,disconnect,health} + InMemoryCache::get +
+# RedisAdapter::put). Pinned to the latest 0.1.x; the attribute macro is
+# stable since tracing 0.1.22 and the public API has not changed since.
+tracing = "0.1"
+# `prometheus` (0.13) is the data-model crate that `opentelemetry-prometheus`
+# (0.16) wraps. We depend on the OTLP wire-format facade and use it to
+# build a `PrometheusExporter` that renders the `prometheus::Registry`
+# snapshot into the Prometheus text exposition format. Both crates are
+# cheap, dependency-light, and stable.
+opentelemetry-prometheus = "0.16"
+prometheus = { version = "0.13", default-features = false }
 
 [dev-dependencies]
 serde_json = "1"

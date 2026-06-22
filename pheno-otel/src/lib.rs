@@ -143,7 +143,13 @@ impl proptest::arbitrary::Arbitrary for OtlpError {
                 .expect("otlp_error regex")
                 .prop_map(Self::InvalidAttribute)
                 .boxed(),
+            // proptest 1.11's `Just<T>` requires `T: Clone + fmt::Debug`,
+            // but `OtlpError` is intentionally not Clone (errors carry
+            // context that shouldn't be duplicated). Map a fresh unit
+            // instead — same statistical effect, no Clone bound.
+            (0..1u32).prop_map(|_| Self::NotConfigured(String::new())).boxed(),
         ]
+        .boxed()
     }
 }
 

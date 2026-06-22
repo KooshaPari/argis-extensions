@@ -32,6 +32,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use redis::AsyncCommands;
 use tokio::sync::Mutex;
+use tracing::instrument;
 
 use crate::ports::{CacheError, HexCachePort};
 
@@ -117,6 +118,11 @@ impl HexCachePort for RedisAdapter {
         Ok(value)
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self, value),
+        fields(backend = "redis", key = %key, ttl_secs = ttl.as_secs())
+    )]
     async fn put(&self, key: &str, value: Vec<u8>, ttl: Duration) -> Result<(), CacheError> {
         if key.is_empty() {
             return Err(CacheError::InvalidKey("empty key".to_string()));

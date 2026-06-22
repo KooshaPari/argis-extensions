@@ -95,6 +95,13 @@ pub mod ports;
 /// Concrete adapter implementations.
 pub mod adapters;
 
+/// v22-T1 (L25) metrics facade. `Counter` / `Gauge` / `Histogram`
+/// wrappers backed by a single `prometheus::Registry` plus a
+/// thin OTLP-exporter attachment helper. See [`metrics`] for the
+/// surface area and the rationale for owning a local facade instead of
+/// re-exporting the bare `prometheus` crate types.
+pub mod metrics;
+
 // Re-exports for the most common entry points so downstream crates can
 // `use pheno_port_adapter::HexCachePort` instead of
 // `pheno_port_adapter::ports::HexCachePort`. Re-exports are kept flat
@@ -124,8 +131,13 @@ impl proptest::arbitrary::Arbitrary for AdapterError {
                 .expect("adapter_error regex")
                 .prop_map(Self::HealthCheckFailed)
                 .boxed(),
-            proptest::strategy::Just(Self::Timeout).boxed(),
+            // proptest 1.11's `Just<T>` requires `T: Clone + fmt::Debug`,
+            // but `AdapterError` is intentionally not Clone (errors carry
+            // context that shouldn't be duplicated). Map a fresh unit
+            // instead — same statistical effect, no Clone bound.
+            (0..1u32).prop_map(|_| Self::Timeout).boxed(),
         ]
+        .boxed()
     }
 }
 
