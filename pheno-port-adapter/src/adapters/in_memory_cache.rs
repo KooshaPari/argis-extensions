@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
+use tracing::instrument;
 
 use crate::ports::{CacheError, HexCachePort};
 
@@ -61,6 +62,7 @@ impl InMemoryCache {
 
 #[async_trait]
 impl HexCachePort for InMemoryCache {
+    #[instrument(level = "debug", skip(self), fields(backend = "in_memory", key = %key))]
     async fn get(&self, key: &str) -> Result<Option<Vec<u8>>, CacheError> {
         if key.is_empty() {
             return Err(CacheError::InvalidKey("empty key".to_string()));

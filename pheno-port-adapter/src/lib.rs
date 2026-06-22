@@ -37,16 +37,21 @@ use thiserror::Error;
 /// Error type for transport-level [`PortAdapter`] operations.
 #[derive(Debug, Error)]
 pub enum AdapterError {
-    /// The adapter could not establish a connection to the requested endpoint.
+    /// A call to [`PortAdapter::connect`] failed. The wrapped string
+    /// is a human-readable description of why (e.g. `"connection
+    /// refused"`, `"invalid endpoint: ..."`).
     #[error("connect failed: {0}")]
     ConnectFailed(String),
-    /// The adapter could not cleanly disconnect an active connection.
+    /// A call to [`PortAdapter::disconnect`] failed. Rare — most
+    /// adapters treat disconnect as infallible.
     #[error("disconnect failed: {0}")]
     DisconnectFailed(String),
-    /// The adapter health probe failed with the provided diagnostic message.
+    /// A call to [`PortAdapter::health`] reported the adapter as
+    /// unhealthy. Subsequent connects are likely to fail.
     #[error("health check failed: {0}")]
     HealthCheckFailed(String),
-    /// The adapter operation exceeded its configured deadline.
+    /// A transport-level operation exceeded its deadline. Surfaced by
+    /// adapters that wrap their I/O in a timeout.
     #[error("timeout")]
     Timeout,
 }
@@ -63,13 +68,23 @@ pub struct Connection {
 /// Synchronous by design — the adapter itself owns its async runtime
 /// story. Async work belongs in the hex-port traits under [`ports`].
 pub trait PortAdapter: Send + Sync {
-    /// Return the stable adapter name used in logs, diagnostics, and registries.
+    /// Stable, human-readable adapter name (e.g. `"tcp"`, `"unix"`).
+    /// Used in logs, metrics labels, and error messages.
     fn name(&self) -> &str;
-    /// Verify that the adapter is configured and reachable.
+
+    /// Cheap liveness check that does not perform I/O. Returns
+    /// [`AdapterError::HealthCheckFailed`] if the adapter is in a state
+    /// where a subsequent [`Self::connect`] is likely to fail.
     fn health(&self) -> Result<(), AdapterError>;
-    /// Establish a connection to the provided endpoint.
+
+    /// Open a connection to `endpoint` (URI scheme chosen by the
+    /// adapter — e.g. `"tcp://host:port"` for [`adapters::TcpAdapter`]).
+    /// Returns a [`Connection`] handle that the caller passes to
+    /// [`Self::disconnect`].
     fn connect(&self, endpoint: &str) -> Result<Connection, AdapterError>;
-    /// Disconnect the adapter from its active endpoint or session.
+
+    /// Close the active connection. Idempotent: a second call on an
+    /// already-disconnected adapter returns `Ok(())`.
     fn disconnect(&self) -> Result<(), AdapterError>;
 }
 
@@ -80,11 +95,64 @@ pub mod ports;
 /// Concrete adapter implementations.
 pub mod adapters;
 
+/// v22-T1 (L25) metrics facade. `Counter` / `Gauge` / `Histogram`
+/// wrappers backed by a single `prometheus::Registry` plus a
+/// thin OTLP-exporter attachment helper. See [`metrics`] for the
+/// surface area and the rationale for owning a local facade instead of
+/// re-exporting the bare `prometheus` crate types.
+pub mod metrics;
+
 // Re-exports for the most common entry points so downstream crates can
 // `use pheno_port_adapter::HexCachePort` instead of
 // `pheno_port_adapter::ports::HexCachePort`. Re-exports are kept flat
 // (not nested) so adding a new port doesn't break import paths.
-pub use ports::{CacheError, HexCachePort};
+pub use ports::{CacheError, HexCachePort, HexTimePort};
+
+// ---------------------------------------------------------------------------
+// proptest::Arbitrary impls (v20-T5 / L23)
+// ---------------------------------------------------------------------------
+
+impl proptest::arbitrary::Arbitrary for AdapterError {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+        proptest::prop_oneof![
+            proptest::string::string_regex("[A-Za-z0-9 _\\-\\.]{1,80}")
+                .expect("adapter_error regex")
+                .prop_map(Self::ConnectFailed)
+                .boxed(),
+            proptest::string::string_regex("[A-Za-z0-9 _\\-\\.]{1,80}")
+                .expect("adapter_error regex")
+                .prop_map(Self::DisconnectFailed)
+                .boxed(),
+            proptest::string::string_regex("[A-Za-z0-9 _\\-\\.]{1,80}")
+                .expect("adapter_error regex")
+                .prop_map(Self::HealthCheckFailed)
+                .boxed(),
+            // proptest 1.11's `Just<T>` requires `T: Clone + fmt::Debug`,
+            // but `AdapterError` is intentionally not Clone (errors carry
+            // context that shouldn't be duplicated). Map a fresh unit
+            // instead — same statistical effect, no Clone bound.
+            (0..1u32).prop_map(|_| Self::Timeout).boxed(),
+        ]
+        .boxed()
+    }
+}
+
+impl proptest::arbitrary::Arbitrary for Connection {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with((): Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::Strategy;
+        proptest::string::string_regex("[a-z]{1,3}://[A-Za-z0-9_\\-\\.]{1,32}(:[0-9]{1,5})?")
+            .expect("connection id regex")
+            .prop_map(|id| Connection { id })
+            .boxed()
+    }
+}
 
 #[cfg(test)]
 mod tests {
