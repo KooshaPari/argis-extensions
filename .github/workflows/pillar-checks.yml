@@ -1,0 +1,21 @@
+name: Pillar Fleet Checks
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'  # Monday 04:00 UTC
+  pull_request:
+    branches: [main]
+
+jobs:
+  pillar-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 1}
+      - name: Inventory
+        run: bash tools/pillar-fleet/inventory.sh
+      - name: Drift
+        run: bash tools/pillar-fleet/drift.sh 
+      - name: Scorecard
+        run: bash tools/pillar-fleet/scorecard.sh
