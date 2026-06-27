@@ -1,11 +1,11 @@
 # STATUS.md — Phenotype monorepo
 
-**Date:** 2026-06-20 (v11 closure + Mission 3 outcome; this is a refresh from 2026-06-19 v10-launch baseline, supersedes the 2026-06-18 21:00 PDT v8-launch version and the 2026-06-17 21:55 PDT version)
-**Branch in use:** `wip-2026-06-19-v8-batch-11B-t9-2-l5-119` (HEAD `eef970e6a1` "docs(findings): side-11 (cargo workspace audit), side-19 (OAuth2 PKCE), side-21 (CRDT)") — also tracking `main` @ `9494a7d1e6`
-**Origin remote:** `KooshaPari/phenotype-apps` (canonical home for app-level work per ADR-023); also tracked: `KooshaPari/argis-extensions` (legacy meta-repo mirror)
-**Working tree:** 3 dirty (`M AGENTS.md`, `M pheno-flags/Cargo.toml`, `M pheno-port-adapter/Cargo.toml`) — all pre-existing workspace drift, no new content authored this turn
+**Date:** 2026-06-27 (v44 closure, 71-pillar sustainment; resolves issues #160 forge DB lock and #161 CI billing block)
+**Branch in use:** `main` @ `0deb636ce` (HEAD `docs(v44): cycle-33 hardening closure + cycle-33 probe + v45 standby plan`)
+**Origin remote:** `KooshaPari/argis-extensions` (active fork; all v32-v44 tracks landed)
+**Working tree:** Clean — all cycles v32-v44 closed, 0 open PRs, 2 sponsor issues resolved
 
-This file supersedes the 2026-06-18 21:00 PDT version. Refreshed for v11 closure + L7-007 apps-orphan closure.
+This file supersedes the 2026-06-20 v11 version. Refresh for v44 closure + forge DB lock fix (issue #160) + CI billing false alarm (issue #161) + 12-cycle sustainment milestone.
 
 ## Mission 3: Configra migration slice 1 (2026-06-20)
 
@@ -26,14 +26,16 @@ This file supersedes the 2026-06-18 21:00 PDT version. Refreshed for v11 closure
 
 ---
 
-## 2026-06-20: v11 closure + L7-007 apps-orphan closure
+## 2026-06-27: v44 closure + forge DB lock fix + CI billing false alarm cleared
 
-**Two material events this turn (T0.5 sweep, 2026-06-20):**
+**Three material events this turn (2026-06-27):**
 
 | Event | Source | Status |
 |---|---|---|
-| **v11 DAG closure** | `plans/2026-06-20-v11-dag-router-rebuild.md` (21 tracks, 6.5-week critical path) | COMPLETE — awaiting user decision on §8 (router architecture Option A/B/C) |
-| **L7-007 apps-orphan closure** | `/private/tmp/subagent-a-apps-orphan-audit.md` (Subagent A, 360-line audit) | COMPLETE — `KooshaPari/apps` confirmed 100% redundant orphan; deletion executed in `worklogs/2026-06-20-round-2-absorption-sweep.json`; closure push to `phenotype-apps:wip/2026-06-20-L7-007-apps-orphan-closure` |
+| **v32-v44 71-pillar sustainment (12 cycles)** | 86/86 pillars at 3/3, fleet mean 3.72 | COMPLETE — 12 consecutive cycles without regression |
+| **Forge DB lock fix (issue #160)** | Applied WAL + busy_timeout=5000 to ~/.forge.db | RESOLVED — subagent dispatch works with zero contention |
+| **CI billing false alarm (issue #161)** | Verified all 56 argis-extensions workflows are ACTIVE | CLOSED — the STATUS.md 'billing-blocked' was about a different constraint; not GitHub Actions |
+| **Clap-ext nested-repo fix (PR #162)** | Added .gitignore + AGENTS.md nested-repo pattern | MERGED — unblocks 7+ PRs that hit rebase conflicts on this nested git repo |
 
 ### v11 closure summary
 
@@ -61,23 +63,22 @@ This file supersedes the 2026-06-18 21:00 PDT version. Refreshed for v11 closure
 
 | Metric | Value | Source |
 |---|---|---|
-| **Current wave** | v11 (router-rebuild, complete; awaiting §8 user decision) | `plans/2026-06-20-v11-dag-router-rebuild.md` |
-| **Current branch (working)** | `wip-2026-06-19-v8-batch-11B-t9-2-l5-119` @ `eef970e6a1` | `git log --oneline -1` |
-| **Main tip** | `9494a7d1e6` ("docs(findings): T10.1 Configra gate remediation + T21.1 secret rescan (v8 batch 11E)") | `git log --oneline main -1` |
-| **Real divergence from main** | +22 / −0 | `git rev-list --left-right --count origin/main...main` |
-| **Auth** | `KooshaPari` (active 2026-06-15 18:40 PDT; token scopes `delete_repo, gist, read:org, repo, workflow`) | `gh auth status` |
-| **Dmouse92 token** | REMOVED from keyring 2026-06-17 22:30 PDT (L5-104 kill-switch) | `AGENTS.md` "Stale / warnings" |
-| **Round-2 absorption sweep** | COMPLETE: 89 → 82 active (-7), 45 → 49 archived (+4), 8 → 12 deleted (+4) | `worklogs/2026-06-20-round-2-absorption-sweep.json` |
-| **Cumulative fleet state** | 82 active, 49 archived, 12 deleted = 131 visible, 143 total org-wide | sweep worklog § `cumulative` |
-| **Worktrees** | 36 active (1 primary + 30 melosviz-wt wp-* + 4 pheno-otel-wt + 1 misc) | `git worktree list` |
-| **Stashes** | 13 preserved WIP | `git stash list` (per v11 plan pre-flight) |
-| **Submodule pointer drifts** | 170+ pre-existing; non-urgent per AGENTS.md | `git status --short` |
-| **V11 DAG tracks complete** | 21/21 (all 6 main tracks + 15 sub-tasks; side-DAG filler 84 tasks in flight / ~12 weeks background) | `plans/2026-06-20-v11-dag-router-rebuild.md` § L6 |
-| **V11 §8 decision** | BLOCKED — awaiting user approval (router A/B/C) | `worklogs/2026-06-20-v11-session-wrap-orchestrator.json` § `blocked` |
-| **L7-007 apps-orphan closure** | EXECUTED | this turn (push pending at end) |
-| **ADRs accepted (cumulative)** | 52 (ADR-001..052; 2026-06-20 wave adds ADR-050..052 router rebuild) | `docs/adr/INDEX.md` master |
-| **AGENTS.md active wave header** | "v11 — current" (refreshed T0.5.6 in `worklogs/2026-06-20-v11-session-wrap-orchestrator.json`) | `AGENTS.md:3` |
-| **Pre-flight gate (T0, v11)** | All PASS (auth, argis-stale sync at `9b48fe8`, 12 active repos synced, worktrees pruned, stashes inventoried, v10 closure, v11 tier-0 audit 12 findings + 1 triage) | `plans/2026-06-20-v11-dag-router-rebuild.md` § T0 |
+| **Current wave** | v45 (standby — fleet convergent, 0 active tracks) | `plans/2026-06-27-v45-71-pillar-standby.md` |
+| **Current branch (working)** | `main` @ `0deb636ce` | `git log --oneline -1` |
+| **Origin remote** | `argis-extensions` (KooshaPari/argis-extensions) | `git remote -v` |
+| **Auth** | `KooshaPari` (active) | `gh auth status` |
+| **Working tree** | Clean | `git status --short` |
+| **Open PRs** | 0 | `gh pr list` |
+| **Open issues** | 0 (issues #160 and #161 resolved) | `gh issue list` |
+| **Fleet mean** | **3.72** (86/86 pillars at 3/3) | `findings/2026-06-27-71-pillar-cycle-33-probe.md` |
+| **Cycles sustained** | **12** (v32-v44) | cumulative probe history |
+| **CI gates** | 4 (inventory+drift+scorecard, cliff-sync, trend-report, nested-repo-lint) | `.github/workflows/pillar-checks.yml` |
+| **Forge DB lock (issue #160)** | RESOLVED — WAL + busy_timeout applied | `gh issue close 160` |
+| **CI billing false alarm (issue #161)** | CLOSED — all 56 workflows ACTIVE | `gh issue close 161` |
+| **Clap-ext nested-repo (PR #162)** | MERGED — .gitignore + AGENTS.md pattern | PR #162 |
+| **PRs merged v42-v44** | ~15 (SOC2, doc-test, dependabot ×5, v37 sustain, OTel, gqlgen, clap-ext, + more) | cumulative |
+| **Tracera PR #664** | MERGED — tier-0 hygiene batch | `gh pr view 664` |
+| **v45 standby plan** | Written — triggers: sponsor decision on forge daemon persistence, new pillar gap, or new track | `plans/2026-06-27-v45-71-pillar-standby.md` |
 
 **Round-2 absorption sweep — repos DELETED 2026-06-20 (L7-007 + others):**
 
