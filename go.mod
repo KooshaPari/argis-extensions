@@ -6,7 +6,7 @@ toolchain go1.26.4
 
 require (
 	connectrpc.com/connect v1.20.0
-	github.com/99designs/gqlgen v0.17.90
+	github.com/99designs/gqlgen v0.17.93
 	github.com/bytedance/sonic v1.15.1
 	github.com/fsnotify/fsnotify v1.10.0
 	github.com/go-chi/chi/v5 v5.2.5
@@ -26,7 +26,7 @@ require (
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
 	github.com/valyala/fasthttp v1.70.0
-	github.com/vektah/gqlparser/v2 v2.5.33
+	github.com/vektah/gqlparser/v2 v2.5.35
 	golang.org/x/crypto v0.53.0
 	golang.org/x/net v0.56.0
 )
@@ -43,6 +43,7 @@ require (
 	github.com/bytedance/sonic/loader v0.5.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
+	github.com/coder/websocket v1.8.15 // indirect
 	github.com/creasty/defaults v1.8.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
