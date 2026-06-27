@@ -227,6 +227,24 @@ Retrospective expansion of the §8 router-architecture acceptance above, written
 
 ---
 
+## Nested Git Repo Pattern (L5-155 / clap-ext, 2026-06-26)
+
+This monorepo contains **nested git repositories** — directories with their own `.git/` that are NOT registered in `.gitmodules` and NOT tracked by the parent index. Examples: `clap-ext/`, `security-analysis/`.
+
+**Symptom of missing handling:** CI fails with
+`fatal: No url found for submodule path '<name>' in .gitmodules`
+because `actions/checkout` runs `git submodule foreach --recursive`, finds the nested `.git/`, and tries to treat it as a submodule.
+
+**Required `.gitignore` entries:**
+```
+/clap-ext/
+/security-analysis/
+```
+
+**Rule:** Any nested repo added to this monorepo MUST be added to `.gitignore` at the top level (with leading `/`) on the same PR that adds the directory. Document the nested repo's purpose and ownership in this section.
+
+---
+
 ## App-level repo triage & app substrate placement (ADR-023)
 
 Source of truth: `docs/adr/2026-06-15/ADR-023-agent-effort-governance.md`.
