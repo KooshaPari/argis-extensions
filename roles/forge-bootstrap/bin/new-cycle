@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# =============================================================================
+# new-cycle — Bootstrap a new work cycle
+#
+# Creates a session worklog (v2.1 schema), fresh branch, missing stub dirs,
+# and runs pillar-fleet baselines.
+#
+# Usage:
+#   ./new-cycle <version> <theme> [device]
+#
+# Arguments:
+#   version   Version number for the branch (e.g., 39 -> chore/v39-<theme>-<date>)
+#   theme     Short kebab-case theme (e.g., dag-wave-2-onboard)
+#   device    Device identifier (default: macbook). Used in worklog frontmatter.
+#
+# Environment:
+#   REPO_ROOT     Repo root (default: auto-detected via git rev-parse)
+#   AUTHOR_NAME   Author name for worklog (default: auto-detected via git config)
+#
+# Examples:
+#   ./new-cycle 39 dag-wave-2-onboard
+#   ./new-cycle 40 "71-pillar-cycle-15" "heavy-runner"
+# =============================================================================
+
+# ---- Resolve paths and metadata --------------------------------------------
+REPO_ROOT="${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null)}"
+if [ -z "$REPO_ROOT" ] || [ ! -d "$REPO_ROOT" ]; then
+  echo "ERROR: REPO_ROOT not set and not inside a git repo." >&2
+  exit 1
+fi
+
+cd "$REPO_ROOT"
+
+VERSION="${1:-}"
+THEME="${2:-}"
+DEVICE="${3:-macbook}"
+
+if [ -z "$VERSION" ] || [ -z "$THEME" ]; then
+  echo "Usage: $0 <version> <theme> [device]" >&2
+  echo "" >&2
+  echo "  version   Version number (e.g., 39 -> chore/v39-<theme>-<date>)" >&2
+  echo "  theme     Kebab-case theme (e.g., dag-wave-2-onboard)" >&2
+  echo "  device    Device identifier (default: macbook)" >&2
+  exit 1
+fi
+
+# Validate version is a positive integer
+if ! [[ "$VERSION" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: version must be a positive integer, got '$VERSION'" >&2
+  exit 1
+fi
+
+CYCLE_DATE="$(date -u +%Y-%m-%d)"
+BRANCH_NAME="chore/v${VERSION}-${THEME}-${CYCLE_DATE}"
+WORKLOG_FILE="worklogs/${CYCLE_DATE}-v${VERSION}-${THEME}.md"
+AUTHOR_NAME="${AUTHOR_NAME:-$(git config user.name 2>/dev/null || echo 'unknown')}"
+
+echo "==> Repo root: $REPO_ROOT"
+echo "==> Branch:    $BRANCH_NAME"
+echo "==> Worklog:   $WORKLOG_FILE"
+echo "==> Device:    $DEVICE"
+echo ""
+
+# ---- 1. Create session worklog with v2.1 schema (YAML frontmatter) ---------
+mkdir -p "$(dirname "$WORKLOG_FILE")"
+
+if [ -f "$WORKLOG_FILE" ]; then
+  echo "!! Worklog already exists: $WORKLOG_FILE (will not overwrite)"
+else
+  cat > "$WORKLOG_FILE" <<WORKLOGEOF
+---
+# pheno-worklog-schema/v2.1 - Session worklog
+schema: pheno-worklog-schema/v2.1
+schema_version: "2.1"
+date: "${CYCLE_DATE}"
+task_id: "v${VERSION}-${THEME}"
+layer: "GOV"
+action: "cycle-bootstrap"
+device: "${DEVICE}"
+author: "${AUTHOR_NAME}"
+branch: "${BRANCH_NAME}"
+risk: "medium"
+scope: ""
+notes: ""
+deps: ""
+links: ""
+agents: []
+tracks: []
+---
+
+# v${VERSION} - ${THEME} (${CYCLE_DATE})
+
+## Summary
+
+<!-- Cycle summary - update after session work is complete. -->
+
+## Objectives
+
+1.
+2.
+3.
+
+## Deliverables
+
+-
+
+## Baseline scores (pre-cycle)
+
+See below for inventory and scorecard output captured at bootstrap time.
+
+## Cross-references
+
+- Branch: \`${BRANCH_NAME}\`
+- Plan: \`plans/${CYCLE_DATE}-v${VERSION}-${THEME}.md\`
+
+WORKLOGEOF
+
+  echo "   v1 Created $WORKLOG_FILE"
+fi
+
+# ---- 2. Create fresh branch from main --------------------------------------
+echo ""
+echo "==> Setting up branch from main..."
+
+# Fetch latest main unless disabled
+if [ "${SKIP_FETCH:-0}" != "1" ]; then
+  git fetch origin main 2>/dev/null || echo "   (no remote 'origin' or fetch failed; using local main)"
+fi
+
+if git show-ref --verify --quiet "refs/heads/$BRANCH_NAME"; then
+  echo "   !! Branch '$BRANCH_NAME' already exists locally - will not recreate."
+  echo "   !! Switching to it and proceeding..."
+  git checkout "$BRANCH_NAME"
+else
+  # Create branch from main (HEAD of main)
+  if git show-ref --verify --quiet refs/heads/main; then
+    git checkout -b "$BRANCH_NAME" main
+    echo "   v1 Created branch '$BRANCH_NAME' from main"
+  elif git show-ref --verify --quiet refs/remotes/origin/main; then
+    git checkout -b "$BRANCH_NAME" origin/main
+    echo "   v1 Created branch '$BRANCH_NAME' from origin/main"
+  else
+    # Fallback: create from current HEAD
+    echo "   !! No 'main' ref found - creating branch from current HEAD."
+    git checkout -b "$BRANCH_NAME"
+  fi
+fi
+
+# Stage the worklog so it's part of the working tree
+git add "$WORKLOG_FILE" 2>/dev/null && echo "   v1 Staged worklog" || true
+
+# ---- 3. Clone findings/, plans/, docs/adr/ stub dirs if missing ------------
+echo ""
+echo "==> Checking stub directories..."
+
+create_stub_if_missing() {
+  local dir="$1"
+  local stub_file="$dir/.gitkeep"
+  if [ ! -d "$dir" ]; then
+    mkdir -p "$dir"
+    touch "$stub_file"
+    echo "   v1 Created stub: $dir/"
+  else
+    echo "   . Already exists: $dir/"
+  fi
+}
+
+create_stub_if_missing "findings"
+create_stub_if_missing "plans"
+create_stub_if_missing "docs/adr"
+
+# ---- 4. Run pillar-fleet baselines -----------------------------------------
+echo ""
+echo "==> Running pillar-fleet baselines..."
+
+INVENTORY_SCRIPT="$REPO_ROOT/tools/pillar-fleet/inventory.sh"
+SCORECARD_SCRIPT="$REPO_ROOT/tools/pillar-fleet/scorecard.sh"
+
+run_baseline() {
+  local label="$1"
+  local script="$2"
+  local outfile="$3"
+
+  if [ -x "$script" ]; then
+    echo "   Running ${label}..."
+    if bash "$script" > "$outfile" 2>&1; then
+      echo "   v1 $label -> $outfile"
+    else
+      echo "   !! $label exited non-zero (see $outfile)"
+    fi
+  elif [ -f "$script" ]; then
+    echo "   !! $label found but not executable - running with bash"
+    if bash "$script" > "$outfile" 2>&1; then
+      echo "   v1 $label -> $outfile"
+    else
+      echo "   !! $label exited non-zero (see $outfile)"
+    fi
+  else
+    echo "   !! $label not found at $script - skipping"
+  fi
+}
+
+INVENTORY_OUT="worklogs/${CYCLE_DATE}-pillar-inventory.txt"
+SCORECARD_OUT="worklogs/${CYCLE_DATE}-pillar-scorecard.txt"
+
+run_baseline "inventory.sh"  "$INVENTORY_SCRIPT"  "$INVENTORY_OUT"
+run_baseline "scorecard.sh"  "$SCORECARD_SCRIPT"  "$SCORECARD_OUT"
+
+# ---- 5. Print summary ------------------------------------------------------
+echo ""
+echo "================================================================================"
+echo "  NEW CYCLE BOOTSTRAP COMPLETE"
+echo "================================================================================"
+echo ""
+echo "  Branch:     $(git rev-parse --abbrev-ref HEAD)"
+echo "  Base:       $(git rev-parse --short HEAD 2>/dev/null || echo 'n/a')"
+echo "  Worklog:    $WORKLOG_FILE"
+echo "  Date:       $CYCLE_DATE"
+echo "  Device:     $DEVICE"
+echo "  Author:     $AUTHOR_NAME"
+echo ""
+
+BASELINES=""
+if [ -f "$INVENTORY_OUT" ]; then
+  BASELINES="${BASELINES}    inventory: $INVENTORY_OUT"$'\n'
+fi
+if [ -f "$SCORECARD_OUT" ]; then
+  BASELINES="${BASELINES}    scorecard: $SCORECARD_OUT"$'\n'
+fi
+if [ -n "$BASELINES" ]; then
+  echo "  Baselines:"
+  echo -n "$BASELINES"
+fi
+
+echo ""
+echo "  Quick start:"
+echo "    code $WORKLOG_FILE        # edit session worklog"
+echo "    git add -A && git commit  # commit cycle bootstraps"
+echo ""
+echo "================================================================================"
