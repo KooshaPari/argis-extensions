@@ -11,11 +11,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/kooshapari/bifrost-extensions/api/connect"
 	"github.com/kooshapari/bifrost-extensions/api/graphql"
 	"github.com/kooshapari/bifrost-extensions/api/graphql/resolvers"
 	"github.com/kooshapari/bifrost-extensions/db"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Server is the unified API server
@@ -42,21 +42,21 @@ type Config struct {
 	RESTAddr string
 	// Connect endpoint (internal gRPC-like)
 	ConnectAddr string
-	// GraphQL endpoint  
+	// GraphQL endpoint
 	GraphQLAddr string
-	
+
 	// Unified server address (all APIs on one port with path routing)
 	UnifiedAddr string
-	
+
 	// Logging
 	Logger *slog.Logger
-	
+
 	// Database connection (for health checks)
 	Database *db.DB
-	
+
 	// CORS configuration
 	AllowedOrigins []string
-	
+
 	// Development mode
 	DevMode bool
 }
@@ -94,7 +94,7 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 	r.Use(MetricsMiddleware(metrics))
-	
+
 	// CORS
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.AllowedOrigins,
@@ -111,8 +111,8 @@ func NewServer(database *db.DB, cfg Config) *Server {
 	})
 
 	graphqlServer := graphql.NewServerWithConfig(database, graphql.Config{
-		Logger:           logger,
-		EnablePlayground: cfg.DevMode,
+		Logger:              logger,
+		EnablePlayground:    cfg.DevMode,
 		EnableIntrospection: cfg.DevMode,
 	})
 
@@ -137,12 +137,15 @@ func (s *Server) registerRoutes() {
 	// Health check
 	s.router.Get("/health", s.healthHandler)
 	s.router.Get("/ready", s.readyHandler)
-	
+
 	// Metrics endpoint
 	s.router.Get("/metrics", promhttp.Handler().ServeHTTP)
 
 	// REST API - OpenAI-compatible user-facing API
 	s.router.Route("/v1", func(r chi.Router) {
+		// Enforce JSON content type on all mutating routes.
+		r.Use(ContentTypeJSON)
+
 		// These would delegate to bifrost core handlers
 		r.Post("/chat/completions", s.restChatCompletions)
 		r.Post("/completions", s.restCompletions)
@@ -212,4 +215,3 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) GraphQLResolver() *resolvers.Resolver {
 	return s.graphql.Resolver()
 }
-
