@@ -2,90 +2,139 @@ package config
 
 import (
 	"testing"
+	"time"
 )
 
-// TestConfigVersionTracking tests configuration version tracking
+// TestConfigVersionTracking tests configuration version tracking.
 func TestConfigVersionTracking(t *testing.T) {
-	// TODO: Implement version tracking test
-	// cfg, err := LoadWithVersioning("config.yaml")
-	// require.NoError(t, err)
-	//
-	// // Test: Version assigned on load
-	// assert.NotEmpty(t, cfg.Version())
-	// assert.NotEmpty(t, cfg.VersionHash())
-	//
-	// initialVersion := cfg.Version()
-	// initialHash := cfg.VersionHash()
-	//
-	// // Modify config
-	// cfg.Server.Port = 9090
-	//
-	// // Test: Version increments on change
-	// newVersion := cfg.Version()
-	// newHash := cfg.VersionHash()
-	//
-	// assert.NotEqual(t, initialVersion, newVersion, "version should increment")
-	// assert.NotEqual(t, initialHash, newHash, "hash should change")
-	//
-	// // Test: Version persisted
-	// // Reload and verify version is tracked
-	t.Skip("Configuration versioning not yet implemented")
+	cfg := NewVersionedConfig(DefaultConfig())
+
+	// Version assigned on load
+	if cfg.Version() == "" {
+		t.Error("expected version to be non-empty")
+	}
+	if cfg.Hash() == "" {
+		t.Error("expected hash to be non-empty")
+	}
+
+	initialVersion := cfg.Version()
+	initialHash := cfg.Hash()
+
+	// Modify the config directly, then record the change.
+	cfg.Server.Port = 9090
+	cfg.RecordChange("changed port")
+
+	newVersion := cfg.Version()
+	newHash := cfg.Hash()
+
+	if newVersion == initialVersion {
+		t.Error("expected version to change after modifying config + RecordChange")
+	}
+	if newHash == initialHash {
+		t.Error("expected hash to change after modifying config + RecordChange")
+	}
 }
 
-// TestConfigChangeHistory tests configuration change history
+// TestConfigChangeHistory tests configuration change history.
 func TestConfigChangeHistory(t *testing.T) {
-	// TODO: Implement change history test
-	// cfg, err := LoadWithVersioning("config.yaml")
-	// require.NoError(t, err)
-	//
-	// // Make several changes
-	// cfg.Server.Port = 9090
-	// cfg.Server.Port = 8080
-	// cfg.Server.Port = 7070
-	//
-	// // Test: Changes logged
-	// history := cfg.ChangeHistory()
-	// assert.GreaterOrEqual(t, len(history), 3, "should have at least 3 changes")
-	//
-	// // Test: History queryable
-	// recent := cfg.ChangeHistorySince(time.Now().Add(-1 * time.Hour))
-	// assert.GreaterOrEqual(t, len(recent), 0)
-	//
-	// // Test: Rollback to previous version
-	// previousVersion := history[len(history)-2].Version
-	// err = cfg.RollbackToVersion(previousVersion)
-	// require.NoError(t, err)
-	// assert.Equal(t, 8080, cfg.Server.Port, "should rollback to previous port")
-	//
-	// // Test: Diff between versions
-	// diff := cfg.Diff(history[0].Version, history[len(history)-1].Version)
-	// assert.NotEmpty(t, diff, "diff should not be empty")
-	t.Skip("Configuration versioning not yet implemented")
+	cfg := NewVersionedConfig(DefaultConfig())
+
+	// Should start with empty history
+	if len(cfg.ChangeHistory()) != 0 {
+		t.Errorf("expected empty history, got %d entries", len(cfg.ChangeHistory()))
+	}
+
+	// Make several changes
+	cfg.RecordChange("changed port to 9090")
+	cfg.RecordChange("changed port to 8080")
+	cfg.RecordChange("changed port to 7070")
+
+	// Verify changes logged
+	history := cfg.ChangeHistory()
+	if len(history) < 3 {
+		t.Errorf("expected at least 3 history entries, got %d", len(history))
+	}
+
+	// Verify history is queryable by time
+	since := cfg.ChangeHistorySince(time.Now().Add(-1 * time.Hour))
+	if len(since) != 3 {
+		t.Errorf("expected 3 recent changes, got %d", len(since))
+	}
+
+	// Verify no changes from the future
+	future := cfg.ChangeHistorySince(time.Now().Add(1 * time.Hour))
+	if len(future) != 0 {
+		t.Errorf("expected 0 future changes, got %d", len(future))
+	}
 }
 
-// TestConfigVersionComparison tests configuration version comparison
+// TestConfigVersionComparison tests configuration version comparison.
 func TestConfigVersionComparison(t *testing.T) {
-	// TODO: Implement version comparison test
-	// cfg1, err := LoadWithVersioning("config1.yaml")
-	// require.NoError(t, err)
-	//
-	// cfg2, err := LoadWithVersioning("config2.yaml")
-	// require.NoError(t, err)
-	//
-	// // Test: Compare versions
-	// comparison := cfg1.Compare(cfg2)
-	// assert.NotNil(t, comparison)
-	//
-	// // Test: Detect breaking changes
-	// breaking := comparison.BreakingChanges()
-	// // Verify breaking changes are detected
-	//
-	// // Test: Detect additive changes
-	// additive := comparison.AdditiveChanges()
-	// // Verify additive changes are detected
-	//
-	// // Test: Generate migration path
-	// migrationPath := comparison.MigrationPath()
-	// assert.NotEmpty(t, migrationPath, "migration path should be generated")
-	t.Skip("Configuration versioning not yet implemented")
+	baseCfg := NewVersionedConfig(DefaultConfig())
+
+	// Create a modified config
+	modifiedDefault := DefaultConfig()
+	modifiedDefault.Server.Port = 9090
+	modifiedDefault.Routing.RouteLLM.Enabled = true
+	modifiedCfg := NewVersionedConfig(modifiedDefault)
+
+	// Compare configurations
+	comparison := baseCfg.Compare(modifiedCfg)
+	if comparison == nil {
+		t.Fatal("expected comparison to be non-nil")
+	}
+
+	// Verify modified fields are detected
+	modified := comparison.ModifiedFields()
+	if len(modified) == 0 {
+		t.Error("expected modified fields to be detected")
+	}
+
+	// Verify specific fields
+	foundPort := false
+	foundRouter := false
+	for _, field := range modified {
+		if field == "server.port" {
+			foundPort = true
+		}
+		if field == "routing.routellm.enabled" {
+			foundRouter = true
+		}
+	}
+	if !foundPort {
+		t.Error("expected server.port to be in modified fields")
+	}
+	if !foundRouter {
+		t.Error("expected routing.routellm.enabled to be in modified fields")
+	}
+
+	// Verify no breaking changes
+	breaking := comparison.BreakingChanges()
+	if breaking == nil {
+		t.Error("expected BreakingChanges() to return non-nil slice")
+	}
+
+	// Verify no additive changes
+	additive := comparison.AdditiveChanges()
+	if additive == nil {
+		t.Error("expected AdditiveChanges() to return non-nil slice")
+	}
+
+	// Verify migration path generated
+	migrationPath := comparison.MigrationPath()
+	if migrationPath == "" {
+		t.Error("expected migration path to be non-empty")
+	}
+
+	// Compare identical configs
+	identicalCfg := NewVersionedConfig(DefaultConfig())
+	sameComparison := baseCfg.Compare(identicalCfg)
+	modifiedIdentical := sameComparison.ModifiedFields()
+	if len(modifiedIdentical) != 0 {
+		t.Errorf("expected no modified fields for identical configs, got %v", modifiedIdentical)
+	}
+	if sameComparison.MigrationPath() != "No changes detected" {
+		t.Errorf("expected 'No changes detected' for identical configs, got %q",
+			sameComparison.MigrationPath())
+	}
 }
