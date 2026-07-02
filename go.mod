@@ -9,7 +9,7 @@ require (
 	github.com/99designs/gqlgen v0.17.93
 	github.com/bytedance/sonic v1.15.1
 	github.com/fsnotify/fsnotify v1.10.0
-	github.com/go-chi/chi/v5 v5.2.5
+	github.com/go-chi/chi/v5 v5.3.0
 	github.com/go-chi/cors v1.2.2
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/golang-migrate/migrate/v4 v4.19.1
