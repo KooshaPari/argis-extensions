@@ -1,0 +1,20 @@
+# argis-monitor example config.
+#
+# Use with:  argis-monitor --config examples/basic.yaml start
+#
+# All keys are optional except `target`.
+
+target: http://127.0.0.1:8080
+poll_interval: 15s        # supports s/m/h/d suffixes
+poll_timeout: 5s
+exporter_addr: 0.0.0.0:9090
+
+# bearer_token: ${BIFROST_ADMIN_TOKEN}
+
+slos:
+  - name: chat_completions_p99
+    window_secs: 2592000   # 30 days
+    target: 0.999          # 99.9% success
+  - name: chat_completions_p95
+    window_secs: 2592000
+    target: 0.95           # 95% success (looser SLO, faster alerts)
