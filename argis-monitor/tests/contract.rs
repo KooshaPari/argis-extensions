@@ -326,3 +326,55 @@ fn grafana_dashboard_json_is_valid_and_references_all_metrics() {
                 "dashboard does not reference metric `{metric}`; exprs: {all_exprs}");
     }
 }
+
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn suppression_window_swallows_webhook_but_state_transitions_still_fire() {
+    use argis_monitor::suppression::{is_suppressed, Day, WindowSpec};
+
+    // Suppression window covering every second of every day (HH:MM loop wrap).
+    let w = WindowSpec {
+        name: "everywhere".into(),
+        start_time: Some("00:00".into()),
+        end_time: Some("23:59".into()),
+        days: vec![],
+        start_at: None, end_at: None,
+        targets: vec!["bad".into()],
+        rules: vec!["smoke_rule".into()],
+        reason: Some("test".into()),
+    };
+
+    // is_suppressed returns the window name.
+    let now = argis_monitor::suppression::unix_from_utc(2026, 7, 6, 12, 0, 0);
+    assert_eq!(
+        is_suppressed(&[w.clone()], "bad", "smoke_rule", now),
+        Some("everywhere".into())
+    );
+    // Different target -> no match.
+    assert!(is_suppressed(&[w.clone()], "other", "smoke_rule", now).is_none());
+    // Different rule - no match.
+    assert!(is_suppressed(&[w], "bad", "other_rule", now).is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn one_shot_suppression_window_does_not_match_outside_range() {
+    use argis_monitor::suppression::{is_suppressed, WindowSpec};
+
+    let w = WindowSpec {
+        name: "maintenance".into(),
+        start_at: Some("2026-07-15T02:00:00Z".into()),
+        end_at: Some("2026-07-15T04:00:00Z".into()),
+        start_time: None, end_time: None, days: vec![],
+        targets: vec![], rules: vec![],
+        reason: Some("DB upgrade".into()),
+    };
+    // Inside the range - suppress.
+    let t_in = argis_monitor::suppression::unix_from_utc(2026, 7, 15, 3, 0, 0);
+    assert!(is_suppressed(&[w.clone()], "any", "any", t_in).is_some());
+    // Before start - no suppress.
+    let t_before = argis_monitor::suppression::unix_from_utc(2026, 7, 15, 1, 0, 0);
+    assert!(is_suppressed(&[w.clone()], "any", "any", t_before).is_none());
+    // After end - no suppress.
+    let t_after = argis_monitor::suppression::unix_from_utc(2026, 7, 15, 5, 0, 0);
+    assert!(is_suppressed(&[w], "any", "any", t_after).is_none());
+}

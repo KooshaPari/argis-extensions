@@ -21,6 +21,7 @@ use crate::slo::{burn_rate, BurnWindow};
 use crate::target::Target;
 use crate::push;
 use crate::state_store::{StateStore, TrackerSnapshot};
+use crate::suppression;
 use crate::webhook;
 
 /// One poll's outcome.
@@ -300,13 +301,30 @@ impl Monitor {
                 let tracker = trackers.entry(key.clone()).or_insert_with(AlertStateTracker::default);
                 match alerts::evaluate(rule, target_name, burn, ts, tracker) {
                     Decision::Fire(payload) => {
-                        // Deliver before persistence so the post-fire
-                        // tracker state (which reflects the cooldown
-                        // anchor) is what we save.
-                        let reports = webhook::deliver_all(&self.inner.http, &rule.webhooks, &payload).await;
-                        let mut last = self.inner.last_delivery.lock().await;
-                        for r in reports {
-                            last.insert(r.url.clone(), r);
+                        // Suppression check. A matching window swallows the
+                        // webhook delivery but the state machine still
+                        // transitions (so the alert would have fired is
+                        // visible in metrics + the alert_history table).
+                        let window_name = suppression::is_suppressed(
+                            &self.inner.config.alert_windows,
+                            target_name,
+                            &rule.name,
+                            ts,
+                        );
+                        if let Some(wname) = &window_name {
+                            tracing::info!(
+                                target = %target_name,
+                                rule = %rule.name,
+                                window = %wname,
+                                burn = burn,
+                                "alert suppressed by window"
+                            );
+                        } else {
+                            let reports = webhook::deliver_all(&self.inner.http, &rule.webhooks, &payload).await;
+                            let mut last = self.inner.last_delivery.lock().await;
+                            for r in reports {
+                                last.insert(r.url.clone(), r);
+                            }
                         }
                         fired.push(payload);
                     }
