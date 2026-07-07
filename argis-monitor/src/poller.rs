@@ -12,11 +12,14 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
+
+use crate::alerts::{self, AlertRule, AlertStateTracker, Decision};
 use crate::config::{Config, SLO};
 use crate::metrics::{Metrics, Outcome, Sample};
 use crate::ring_buffer::RingBuffer;
 use crate::slo::{burn_rate, BurnWindow};
 use crate::target::Target;
+use crate::webhook;
 
 /// One poll's outcome.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -24,6 +27,8 @@ pub struct PollOutcome {
     pub sample: Sample,
     pub burn_short: f64,
     pub burn_long: f64,
+    #[serde(default)]
+    pub alert_payloads: Vec<crate::alerts::AlertPayload>,
 }
 
 /// Errors the poller can encounter.
@@ -56,6 +61,10 @@ pub(crate) struct MonitorInner {
     pub registry: Arc<Registry>,
     pub metrics: Arc<Mutex<Metrics>>,
     pub counters: Mutex<HashMap<String, TargetCounters>>,
+    /// Per-(target, rule) state machine. Keyed by "{target}::{rule.name}".
+    pub alert_trackers: Mutex<HashMap<String, AlertStateTracker>>,
+    /// Last delivery report per webhook URL (for tests + ops introspection).
+    pub last_delivery: Mutex<HashMap<String, webhook::DeliveryReport>>,
 }
 
 impl Monitor {
@@ -96,6 +105,12 @@ impl Monitor {
             });
         }
 
+        let mut alert_trackers = HashMap::new();
+        for target in &config.targets {
+            for rule in &config.alert_rules {
+                alert_trackers.insert(format!("{}::{}", target.name, rule.name), AlertStateTracker::default());
+            }
+        }
         Ok(Self {
             inner: Arc::new(MonitorInner {
                 config,
@@ -103,6 +118,8 @@ impl Monitor {
                 registry: Arc::new(registry),
                 metrics: Arc::new(Mutex::new(metrics)),
                 counters: Mutex::new(counters),
+                alert_trackers: Mutex::new(alert_trackers),
+                last_delivery: Mutex::new(HashMap::new()),
             }),
         })
     }
@@ -223,7 +240,38 @@ impl Monitor {
             burn_short = bs;
             burn_long = bl;
         }
-        Ok(PollOutcome { sample, burn_short, burn_long })
+        drop(m);
+
+        // Evaluate alert rules (separately so the metrics lock is released).
+        let payloads = self.evaluate_alerts(&target.name, burn_short, burn_long, ts).await;
+        Ok(PollOutcome { sample, burn_short, burn_long, alert_payloads: payloads })
+    }
+
+    /// Evaluate every alert rule against the latest burn rates. Returns the
+    /// list of payloads that fired (already delivered via webhooks).
+    async fn evaluate_alerts(&self, target_name: &str, burn_short: f64, burn_long: f64, ts: u64) -> Vec<alerts::AlertPayload> {
+        let mut fired = Vec::new();
+        for rule in &self.inner.config.alert_rules {
+            let burn = match rule.window {
+                Some(w) if w >= crate::slo::BurnWindow::SLOW_BURN.long => burn_long,
+                _ => burn_short,
+            };
+            let key = format!("{}::{}", target_name, rule.name);
+            let mut trackers = self.inner.alert_trackers.lock().await;
+            let tracker = trackers.entry(key).or_insert_with(AlertStateTracker::default);
+            match alerts::evaluate(rule, target_name, burn, ts, tracker) {
+                Decision::Fire(payload) => {
+                    let reports = webhook::deliver_all(&self.inner.http, &rule.webhooks, &payload).await;
+                    let mut last = self.inner.last_delivery.lock().await;
+                    for r in reports {
+                        last.insert(r.url.clone(), r);
+                    }
+                    fired.push(payload);
+                }
+                Decision::None => {}
+            }
+        }
+        fired
     }
 
     /// Backward-compat helper: poll the first target once.

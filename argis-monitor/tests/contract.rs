@@ -189,3 +189,97 @@ async fn target_yaml_parses_poll_interval() {
     assert_eq!(t.name, "openai");
     assert_eq!(t.poll_interval, Some(std::time::Duration::from_secs(30)));
 }
+
+
+// =====================================================================
+// Slice 3: alerts + webhook delivery
+// =====================================================================
+
+#[test]
+fn alert_state_transitions_in_unit_test() {
+    use argis_monitor::alerts::{evaluate, AlertRule, AlertStateTracker, Decision};
+    let rule = AlertRule {
+        name: "r".into(),
+        slo: "s".into(),
+        threshold: 2.0,
+        resolve_threshold: Some(1.0),
+        for_secs: std::time::Duration::from_secs(5),
+        cooldown: std::time::Duration::from_secs(60),
+        webhooks: vec![],
+        window: None,
+    };
+    let mut t = AlertStateTracker::default();
+
+    // Tick 1: below threshold -> Ok -> no fire
+    assert_eq!(evaluate(&rule, "gateway", 0.5, 100, &mut t), Decision::None);
+    // Tick 2: crosses threshold -> Pending -> no fire
+    assert_eq!(evaluate(&rule, "gateway", 3.0, 101, &mut t), Decision::None);
+    // Tick 3: still in Pending after 5s
+    for _ in 0..4 { evaluate(&rule, "gateway", 3.0, 102, &mut t); }
+    // Tick 8 (after 5s sustained): Firing
+    let d = evaluate(&rule, "gateway", 3.0, 107, &mut t);
+    assert!(matches!(d, Decision::Fire(_)));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn webhook_posts_payload_as_json() {
+    use wiremock::matchers::{method, path};
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/alerts"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = reqwest::Client::new();
+    let target = argis_monitor::alerts::WebhookTarget {
+        url: format!("{}/alerts", server.uri()),
+        headers: Default::default(),
+    };
+    let payload = argis_monitor::alerts::AlertPayload::firing("r", "gateway", "s", 5.0, 2.0, 12345);
+    let reports = argis_monitor::deliver_all(&client, &[target], &payload).await;
+    assert_eq!(reports.len(), 1);
+    assert!(reports[0].success);
+    assert_eq!(reports[0].status, Some(200));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn webhook_records_failure_on_5xx() {
+    use wiremock::matchers::{method, path};
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/alerts"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+
+    let client = reqwest::Client::new();
+    let target = argis_monitor::alerts::WebhookTarget {
+        url: format!("{}/alerts", server.uri()),
+        headers: Default::default(),
+    };
+    let payload = argis_monitor::alerts::AlertPayload::firing("r", "gateway", "s", 5.0, 2.0, 12345);
+    let reports = argis_monitor::deliver_all(&client, &[target], &payload).await;
+    assert_eq!(reports.len(), 1);
+    assert!(!reports[0].success);
+    assert!(reports[0].error.is_some());
+}
+
+#[test]
+fn config_with_alert_rules_round_trips_yaml() {
+    use argis_monitor::alerts::AlertRule;
+    let cfg = Config::default()
+        .with_alert_rule(AlertRule {
+            name: "r1".into(),
+            slo: "s".into(),
+            threshold: 2.0,
+            ..Default::default()
+        });
+    let s = serde_yaml::to_string(&cfg).unwrap();
+    assert!(s.contains("alert_rules"));
+    assert!(s.contains("threshold: 2"));
+    let back: Config = serde_yaml::from_str(&s).unwrap();
+    assert_eq!(back.alert_rules.len(), 1);
+    assert_eq!(back.alert_rules[0].name, "r1");
+}

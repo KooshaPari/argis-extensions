@@ -39,17 +39,21 @@
 //! CLI usage: see `argis-monitor --help`.
 
 
+pub mod alerts;
 pub mod config;
+pub mod exporter;
 pub mod metrics;
 pub mod poller;
 pub mod ring_buffer;
 pub mod slo;
 pub mod target;
-pub mod exporter;
+pub mod webhook;
 
+pub use alerts::{AlertPayload, AlertRule, AlertState, AlertStateTracker, Decision, Severity, WebhookTarget};
 pub use config::{Config, SLO};
-pub use target::Target;
 pub use ring_buffer::{Bucket, RingBuffer};
+pub use target::Target;
+pub use webhook::{deliver_all, DeliveryReport};
 pub use metrics::{Outcome, Sample};
 pub use poller::{Monitor, PollError, PollOutcome};
 pub use slo::{burn_rate, BurnWindow};
