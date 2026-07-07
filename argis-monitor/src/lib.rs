@@ -49,6 +49,7 @@ pub mod push;
 pub mod ring_buffer;
 pub mod slo;
 pub mod state_store;
+pub mod suppression;
 pub mod target;
 pub mod webhook;
 
@@ -56,6 +57,7 @@ pub use alerts::{AlertPayload, AlertRule, AlertState, AlertStateTracker, Decisio
 pub use dashboard::{load_and_summarize, DashboardSummary};
 pub use push::{push_to, run_pusher, PushError};
 pub use state_store::{AlertHistoryRow, StateStore, TrackerSnapshot, StateStoreError};
+pub use suppression::{is_suppressed, Day, WindowSpec};
 pub use config::{Config, SLO};
 pub use ring_buffer::{Bucket, RingBuffer};
 pub use target::Target;

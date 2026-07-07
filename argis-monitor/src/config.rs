@@ -63,6 +63,11 @@ pub struct Config {
     /// Optional bearer token sent on every poll. Use for protected gateways.
     #[serde(default)]
     pub bearer_token: Option<String>,
+    /// Suppression windows. When an alert would fire, the matcher is checked
+    /// against `(target_name, rule_name, now)`; any matching window swallows
+    /// the webhook delivery but still records the state transition.
+    #[serde(default)]
+    pub alert_windows: Vec<crate::suppression::WindowSpec>,
     /// Directory where the alert state store is persisted. Defaults to
     /// `./data` relative to CWD; set to `None` to disable persistence
     /// (useful in tests).
@@ -113,6 +118,7 @@ impl Default for Config {
             push_interval_secs: default_push_interval(),
             push_job: None,
             push_instance: None,
+            alert_windows: Vec::new(),
         }
     }
 }
