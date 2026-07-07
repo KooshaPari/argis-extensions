@@ -57,6 +57,9 @@ pub struct Config {
     /// SLOs to track. Defaults to a single "three nines" chat-completions SLO.
     #[serde(default)]
     pub slos: Vec<SLO>,
+    /// Alert rules evaluated each tick. Empty by default (alerts off).
+    #[serde(default)]
+    pub alert_rules: Vec<crate::alerts::AlertRule>,
     /// Optional bearer token sent on every poll. Use for protected gateways.
     #[serde(default)]
     pub bearer_token: Option<String>,
@@ -74,6 +77,7 @@ impl Default for Config {
             poll_timeout: default_poll_timeout(),
             exporter_addr: default_exporter_addr(),
             slos: vec![SLO::default()],
+            alert_rules: Vec::new(),
             bearer_token: None,
         }
     }
@@ -108,6 +112,10 @@ impl Config {
     /// Add a single SLO.
     pub fn with_slo(mut self, slo: SLO) -> Self {
         self.slos.push(slo); self
+    }
+    /// Add a single alert rule.
+    pub fn with_alert_rule(mut self, rule: crate::alerts::AlertRule) -> Self {
+        self.alert_rules.push(rule); self
     }
 }
 
