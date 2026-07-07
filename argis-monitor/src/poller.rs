@@ -19,6 +19,7 @@ use crate::metrics::{Metrics, Outcome, Sample};
 use crate::ring_buffer::RingBuffer;
 use crate::slo::{burn_rate, BurnWindow};
 use crate::target::Target;
+use crate::state_store::{StateStore, TrackerSnapshot};
 use crate::webhook;
 
 /// One poll's outcome.
@@ -65,6 +66,9 @@ pub(crate) struct MonitorInner {
     pub alert_trackers: Mutex<HashMap<String, AlertStateTracker>>,
     /// Last delivery report per webhook URL (for tests + ops introspection).
     pub last_delivery: Mutex<HashMap<String, webhook::DeliveryReport>>,
+    /// Optional SQLite state store. When present, every alert state transition
+    /// is persisted so the monitor can rehydrate after a restart.
+    pub state_store: Mutex<Option<StateStore>>,
 }
 
 impl Monitor {
@@ -111,6 +115,36 @@ impl Monitor {
                 alert_trackers.insert(format!("{}::{}", target.name, rule.name), AlertStateTracker::default());
             }
         }
+
+        // Open the state store (if configured) and rehydrate trackers.
+        let state_store = match &config.data_dir {
+            Some(dir) => {
+                let path = dir.join("alert_state.sqlite");
+                match StateStore::open(&path) {
+                    Ok(mut s) => {
+                        match s.load_all() {
+                            Ok(restored) => {
+                                for (key, snap) in restored {
+                                    if let Some(slot) = alert_trackers.get_mut(&key) {
+                                        slot.state = snap.state;
+                                        slot.sustained_for = std::time::Duration::from_secs(snap.sustained_secs);
+                                    }
+                                }
+                                tracing::info!(path = %path.display(), "state store loaded");
+                            }
+                            Err(e) => tracing::warn!(error = %e, "failed to load state store; starting fresh"),
+                        }
+                        Some(s)
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, path = %path.display(), "failed to open state store; alerts will be in-memory only");
+                        None
+                    }
+                }
+            }
+            None => None,
+        };
+
         Ok(Self {
             inner: Arc::new(MonitorInner {
                 config,
@@ -120,6 +154,7 @@ impl Monitor {
                 counters: Mutex::new(counters),
                 alert_trackers: Mutex::new(alert_trackers),
                 last_delivery: Mutex::new(HashMap::new()),
+                state_store: Mutex::new(state_store),
             }),
         })
     }
@@ -251,24 +286,41 @@ impl Monitor {
     /// list of payloads that fired (already delivered via webhooks).
     async fn evaluate_alerts(&self, target_name: &str, burn_short: f64, burn_long: f64, ts: u64) -> Vec<alerts::AlertPayload> {
         let mut fired = Vec::new();
+        let mut store = self.inner.state_store.lock().await;
         for rule in &self.inner.config.alert_rules {
             let burn = match rule.window {
                 Some(w) if w >= crate::slo::BurnWindow::SLOW_BURN.long => burn_long,
                 _ => burn_short,
             };
             let key = format!("{}::{}", target_name, rule.name);
-            let mut trackers = self.inner.alert_trackers.lock().await;
-            let tracker = trackers.entry(key).or_insert_with(AlertStateTracker::default);
-            match alerts::evaluate(rule, target_name, burn, ts, tracker) {
-                Decision::Fire(payload) => {
-                    let reports = webhook::deliver_all(&self.inner.http, &rule.webhooks, &payload).await;
-                    let mut last = self.inner.last_delivery.lock().await;
-                    for r in reports {
-                        last.insert(r.url.clone(), r);
+            let snap;
+            {
+                let mut trackers = self.inner.alert_trackers.lock().await;
+                let tracker = trackers.entry(key.clone()).or_insert_with(AlertStateTracker::default);
+                match alerts::evaluate(rule, target_name, burn, ts, tracker) {
+                    Decision::Fire(payload) => {
+                        // Deliver before persistence so the post-fire
+                        // tracker state (which reflects the cooldown
+                        // anchor) is what we save.
+                        let reports = webhook::deliver_all(&self.inner.http, &rule.webhooks, &payload).await;
+                        let mut last = self.inner.last_delivery.lock().await;
+                        for r in reports {
+                            last.insert(r.url.clone(), r);
+                        }
+                        fired.push(payload);
                     }
-                    fired.push(payload);
+                    Decision::None => {}
                 }
-                Decision::None => {}
+                snap = TrackerSnapshot {
+                    state: tracker.state.clone(),
+                    sustained_secs: tracker.sustained_for.as_secs(),
+                };
+            }
+            // Persist outside the trackers lock to avoid contention.
+            if let Some(s) = store.as_mut() {
+                if let Err(e) = s.save(&key, &snap) {
+                    tracing::warn!(target = %target_name, rule = %rule.name, error = %e, "state store save failed");
+                }
             }
         }
         fired
