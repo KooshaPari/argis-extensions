@@ -1,11 +1,8 @@
-//! Async poller: drives the poll loop, records samples into `Metrics`.
-//!
-//! The poller is intentionally simple: one tokio task that pings the
-//! gateway every `poll_interval`, classifies the response, and feeds the
-//! resulting `Sample` to the shared `Metrics` registry. SLO burn-rate
-//! recomputation uses an approximate sliding counter; production should
-//! swap in a ring buffer (see docs/SLO_SPEC.md).
+//! Async poller: drives one tokio task per target, accumulates samples into
+//! the shared `Metrics` registry, and feeds the `RingBuffer` per target for
+//! proper SLO multi-window burn-rate computation.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -17,7 +14,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::config::{Config, SLO};
 use crate::metrics::{Metrics, Outcome, Sample};
+use crate::ring_buffer::RingBuffer;
 use crate::slo::{burn_rate, BurnWindow};
+use crate::target::Target;
 
 /// One poll's outcome.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -29,23 +28,23 @@ pub struct PollOutcome {
 
 /// Errors the poller can encounter.
 #[derive(Debug, Error)]
+#[allow(clippy::large_enum_variant)]
 pub enum PollError {
     #[error("HTTP transport: {0}")]
     Transport(#[from] reqwest::Error),
     #[error("invalid config: {0}")]
     InvalidConfig(String),
+    #[error("no targets configured")]
+    NoTargets,
 }
 
-/// Aggregated counters per (provider, SLO) used by the burn-rate calculator.
-#[derive(Default, Debug)]
-struct SlidingCounters {
-    short_success: u64,
-    short_failure: u64,
-    long_success: u64,
-    long_failure: u64,
+/// Per-target ring buffer state.
+struct TargetCounters {
+    short: RingBuffer,
+    long: RingBuffer,
 }
 
-/// The monitor: shared registry + metrics + config + HTTP client.
+/// The monitor: shared registry + metrics + per-target ring buffers + HTTP client.
 #[derive(Clone)]
 pub struct Monitor {
     inner: Arc<MonitorInner>,
@@ -56,12 +55,15 @@ pub(crate) struct MonitorInner {
     pub http: reqwest::Client,
     pub registry: Arc<Registry>,
     pub metrics: Arc<Mutex<Metrics>>,
-    pub counters: Mutex<SlidingCounters>,
+    pub counters: Mutex<HashMap<String, TargetCounters>>,
 }
 
 impl Monitor {
-    /// Build a new monitor from `config`.
+    /// Build a new monitor from `config`. Errors if `config.targets` is empty.
     pub fn new(config: Config) -> Result<Self, PollError> {
+        if config.targets.is_empty() {
+            return Err(PollError::NoTargets);
+        }
         let mut headers = reqwest::header::HeaderMap::new();
         if let Some(tok) = &config.bearer_token {
             headers.insert(
@@ -78,9 +80,20 @@ impl Monitor {
             .map_err(PollError::Transport)?;
 
         let mut registry = Registry::default();
-        let metrics = Metrics::new(&mut registry, &config.target);
+        let metrics = Metrics::new(&mut registry, config.first_url());
         for slo in &config.slos {
             metrics.record_slo_target(&slo.name, slo.target);
+        }
+
+        // Pre-create per-target ring buffers covering the longest SLO window.
+        let max_window_secs = config.slos.iter().map(|s| s.window_secs).max().unwrap_or(30 * 86_400);
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        let mut counters = HashMap::new();
+        for target in &config.targets {
+            counters.insert(target.name.clone(), TargetCounters {
+                short: RingBuffer::new(BurnWindow::FAST_BURN.long.as_secs(), now),
+                long: RingBuffer::new(max_window_secs, now),
+            });
         }
 
         Ok(Self {
@@ -89,77 +102,92 @@ impl Monitor {
                 http,
                 registry: Arc::new(registry),
                 metrics: Arc::new(Mutex::new(metrics)),
-                counters: Mutex::new(SlidingCounters::default()),
+                counters: Mutex::new(counters),
             }),
         })
     }
 
-    /// Borrow the underlying registry (used by the exporter).
     pub fn registry(&self) -> Arc<Registry> { self.inner.registry.clone() }
+    pub fn config(&self) -> Config { self.inner.config.clone() }
 
-    /// Run the poll loop forever (or until SIGINT/SIGTERM).
+    /// Run all configured targets in parallel. Blocks until SIGINT/SIGTERM.
     pub async fn run(&self) -> anyhow::Result<()> {
         let cfg = self.inner.config.clone();
         info!(
-            target = %cfg.target,
-            interval_secs = cfg.poll_interval.as_secs(),
+            targets = cfg.targets.len(),
+            exporter_addr = %cfg.exporter_addr,
             "argis-monitor starting"
         );
 
         let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
         let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
 
-        let mut ticker = tokio::time::interval(cfg.poll_interval);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-        loop {
-            tokio::select! {
-                _ = ticker.tick() => {
-                    match self.poll_once().await {
-                        Ok(outcome) => debug!(?outcome, "poll ok"),
-                        Err(err) => warn!(error = %err, "poll failed"),
-                    }
-                }
-                _ = sigterm.recv() => { info!("SIGTERM, exiting"); break; }
-                _ = sigint.recv()  => { info!("SIGINT, exiting");  break; }
-            }
+        // Spawn one task per target.
+        let mut handles = Vec::with_capacity(cfg.targets.len());
+        for target in cfg.targets.clone() {
+            let me = self.clone();
+            let interval = target.poll_interval.unwrap_or(cfg.poll_interval);
+            let timeout = target.poll_timeout.unwrap_or(cfg.poll_timeout);
+            let handle = tokio::spawn(async move {
+                me.run_target(target, interval, timeout).await;
+            });
+            handles.push(handle);
         }
+
+        // Block on signals.
+        tokio::select! {
+            _ = sigterm.recv() => { info!("SIGTERM, exiting"); }
+            _ = sigint.recv()  => { info!("SIGINT, exiting");  }
+        }
+        for h in handles { let _ = h.await; }
         Ok(())
     }
 
-    /// Run exactly one poll + SLO recompute.
-    pub async fn poll_once(&self) -> Result<PollOutcome, PollError> {
+    /// One target's poll loop. Spawned as its own tokio task.
+    async fn run_target(&self, target: Target, interval: Duration, timeout: Duration) {
+        let mut ticker = tokio::time::interval(interval);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        info!(target = %target.name, url = %target.url, interval_secs = interval.as_secs(), "target poll loop starting");
+        loop {
+            ticker.tick().await;
+            match self.poll_once_target(&target, timeout).await {
+                Ok(outcome) => debug!(?outcome, target = %target.name, "poll ok"),
+                Err(err) => warn!(target = %target.name, error = %err, "poll failed"),
+            }
+        }
+    }
+
+    /// Poll one specific target once.
+    ///
+    /// The target URL is used as-is if it contains a path; otherwise `/health`
+    /// is appended. This matches the slice-1 convention so the wiremock
+    /// fixtures (which mount on `/health`) keep working unchanged.
+    pub async fn poll_once_target(&self, target: &Target, timeout: Duration) -> Result<PollOutcome, PollError> {
         let started = Instant::now();
-        let url = format!("{}/health", self.inner.config.target.trim_end_matches('/'));
-        let res = self.inner.http.get(&url).send().await;
+        let url = match target.url.find("://") {
+            Some(idx) if target.url[idx + 3..].contains('/') => target.url.clone(),
+            _ => format!("{}/health", target.url.trim_end_matches('/')),
+        };
+        let res = self.inner.http.get(&url).timeout(timeout).send().await;
         let latency = started.elapsed();
         let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
         let sample = match res {
             Ok(resp) => {
                 let status = resp.status().as_u16();
-                if resp.status().is_success() {
-                    Sample {
-                        provider: "gateway".into(),
-                        outcome: Outcome::Ok,
-                        latency,
-                        status_code: status,
-                        timestamp_secs: ts,
-                    }
-                } else {
-                    Sample {
-                        provider: "gateway".into(),
-                        outcome: Outcome::Error,
-                        latency,
-                        status_code: status,
-                        timestamp_secs: ts,
-                    }
+                let outcome = if resp.status().is_success() { Outcome::Ok } else { Outcome::Error };
+                Sample {
+                    provider: target.name.clone(),
+                    outcome,
+                    latency,
+                    status_code: status,
+                    timestamp_secs: ts,
                 }
             }
             Err(e) => {
-                error!(error = %e, "transport error");
+                error!(target = %target.name, error = %e, "transport error");
                 Sample {
-                    provider: "gateway".into(),
+                    provider: target.name.clone(),
                     outcome: Outcome::Error,
                     latency,
                     status_code: 0,
@@ -171,54 +199,47 @@ impl Monitor {
         let mut m = self.inner.metrics.lock().await;
         m.record_sample(&sample);
 
+        // Update per-target ring buffers + compute burn against each SLO.
         let mut c = self.inner.counters.lock().await;
-        match sample.outcome {
-            Outcome::Ok => {
-                c.short_success += 1;
-                c.long_success += 1;
-            }
-            Outcome::Error => {
-                c.short_failure += 1;
-                c.long_failure += 1;
-            }
-        }
+        let tc = c.get_mut(&target.name).ok_or_else(|| {
+            PollError::InvalidConfig(format!("target {} not initialised", target.name))
+        })?;
+        let is_success = sample.outcome == Outcome::Ok;
+        tc.short.record(is_success, ts);
+        tc.long.record(is_success, ts);
+
+        let short_window = BurnWindow::FAST_BURN.long.as_secs();
+        let long_window = tc.long.bucket_size_secs().max(1) * tc.long.len() as u64;
+        let (s_short, f_short) = tc.short.window(short_window, ts);
+        let (s_long, f_long) = tc.long.window(long_window, ts);
 
         let mut burn_short = 0.0_f64;
         let mut burn_long = 0.0_f64;
         for slo in &self.inner.config.slos {
-            let bs = burn_rate(c.short_success, c.short_failure, slo.target);
-            let bl = burn_rate(c.long_success, c.long_failure, slo.target);
-            m.record_burn(&slo.name, BurnWindow::FAST_BURN, bs);
-            m.record_burn(&slo.name, BurnWindow::SLOW_BURN, bl);
+            let bs = burn_rate(s_short, f_short, slo.target);
+            let bl = burn_rate(s_long, f_long, slo.target);
+            m.record_burn(&format!("{}::{}", target.name, slo.name), BurnWindow::FAST_BURN, bs);
+            m.record_burn(&format!("{}::{}", target.name, slo.name), BurnWindow::SLOW_BURN, bl);
             burn_short = bs;
             burn_long = bl;
         }
         Ok(PollOutcome { sample, burn_short, burn_long })
     }
 
-    /// Get a clone of the active config.
-    pub fn config(&self) -> Config { self.inner.config.clone() }
+    /// Backward-compat helper: poll the first target once.
+    pub async fn poll_once(&self) -> Result<PollOutcome, PollError> {
+        let target = self.inner.config.targets.first()
+            .ok_or(PollError::NoTargets)?
+            .clone();
+        self.poll_once_target(&target, self.inner.config.poll_timeout).await
+    }
 
-    /// Reference the canonical fast-burn / slow-burn windows.
     pub fn windows(&self) -> &'static [BurnWindow] {
         &[BurnWindow::FAST_BURN, BurnWindow::SLOW_BURN]
     }
 }
 
-impl Config {
-    /// Convenience for tests.
-    #[doc(hidden)]
-    pub fn for_test(target: impl Into<String>) -> Self {
-        Self {
-            target: target.into(),
-            ..Default::default()
-        }
-    }
-}
-
 impl SLO {
-    /// Convenience builder.
     pub fn with_window_secs(mut self, secs: u64) -> Self { self.window_secs = secs; self }
-    /// Convenience builder.
     pub fn with_target(mut self, target: f64) -> Self { self.target = target; self }
 }
