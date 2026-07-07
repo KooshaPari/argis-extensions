@@ -117,6 +117,61 @@ impl StateStore {
         self.conn.execute("DELETE FROM alert_state WHERE key = ?1", params![key])?;
         Ok(())
     }
+
+    pub fn record_event(
+        &mut self,
+        key: &str,
+        event: &str,
+        severity: &str,
+        burn_rate: f64,
+        threshold: f64,
+        payload_json: &str,
+        fired_at_unix: u64,
+    ) -> Result<(), StateStoreError> {
+        self.conn.execute(
+            "INSERT INTO alert_history (key, event, severity, burn_rate, threshold, payload_json, fired_at_unix)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![key, event, severity, burn_rate, threshold, payload_json, fired_at_unix as i64],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_history(
+        &self,
+        key_prefix: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<AlertHistoryRow>, StateStoreError> {
+        let limit = limit.min(10_000) as i64;
+        let mut stmt = match key_prefix {
+            Some(p) => self.conn.prepare(
+                "SELECT id, key, event, severity, burn_rate, threshold, payload_json, fired_at_unix
+                 FROM alert_history WHERE key LIKE ?1 ORDER BY fired_at_unix DESC, id DESC LIMIT ?2"
+            )?,
+            None => self.conn.prepare(
+                "SELECT id, key, event, severity, burn_rate, threshold, payload_json, fired_at_unix
+                 FROM alert_history ORDER BY fired_at_unix DESC, id DESC LIMIT ?1"
+            )?,
+        };
+        let row_map = |row: &rusqlite::Row| -> rusqlite::Result<AlertHistoryRow> {
+            Ok(AlertHistoryRow {
+                id: row.get(0)?,
+                key: row.get(1)?,
+                event: row.get(2)?,
+                severity: row.get(3)?,
+                burn_rate: row.get(4)?,
+                threshold: row.get(5)?,
+                payload_json: row.get(6)?,
+                fired_at_unix: row.get::<_, i64>(7)? as u64,
+            })
+        };
+        let rows = match key_prefix {
+            Some(p) => stmt.query_map(rusqlite::params![format!("{p}%"), limit], row_map)?,
+            None => stmt.query_map(rusqlite::params![limit], row_map)?,
+        };
+        let mut out = Vec::new();
+        for row in rows { out.push(row?); }
+        Ok(out)
+    }
 }
 
 const SCHEMA: &str = r#"
@@ -128,7 +183,33 @@ CREATE TABLE IF NOT EXISTS alert_state (
     sustained_secs  INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_alert_state_key ON alert_state(key);
+
+CREATE TABLE IF NOT EXISTS alert_history (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    key             TEXT NOT NULL,
+    event           TEXT NOT NULL,
+    severity        TEXT NOT NULL,
+    burn_rate       REAL NOT NULL,
+    threshold       REAL NOT NULL,
+    payload_json    TEXT NOT NULL,
+    fired_at_unix   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_alert_history_key ON alert_history(key);
+CREATE INDEX IF NOT EXISTS idx_alert_history_fired_at ON alert_history(fired_at_unix);
 "#;
+
+/// One row of alert history.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct AlertHistoryRow {
+    pub id: i64,
+    pub key: String,
+    pub event: String,
+    pub severity: String,
+    pub burn_rate: f64,
+    pub threshold: f64,
+    pub payload_json: String,
+    pub fired_at_unix: u64,
+}
 
 /// Wrapper that surfaces corrupt rows as `StateStoreError::InvalidState`.
 /// Kept separate from the closure-internal `parse_state` (which has to return
@@ -279,4 +360,79 @@ mod tests {
         assert_eq!(restored[0].1.state, AlertState::Pending { since: 42 });
         assert_eq!(restored[0].1.sustained_secs, 7);
     }
+
+    // ============================================================
+    // alert_history (slice 7)
+    // ============================================================
+
+    #[test]
+    fn record_event_appends_history_row() {
+        let path = tmpfile("event");
+        let mut store = StateStore::open(&path).unwrap();
+        store.record_event(
+            "gw::r1", "fired", "critical", 5.0, 2.0,
+            r#"{"rule":"r1","target":"gw","slo":"s","burn_rate":5.0,"threshold":2.0,"severity":"Critical","fired_at_unix":1000,"message":"m"}"#,
+            1000,
+        ).unwrap();
+        store.record_event(
+            "gw::r1", "resolved", "ok", 0.5, 2.0,
+            r#"{"rule":"r1","target":"gw","slo":"s","burn_rate":0.5,"threshold":2.0,"severity":"Ok","fired_at_unix":2000,"message":"m"}"#,
+            2000,
+        ).unwrap();
+        let all = store.list_history(None, 100).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].event, "resolved");
+        assert_eq!(all[0].severity, "ok");
+        assert_eq!(all[1].event, "fired");
+    }
+
+    #[test]
+    fn list_history_filters_by_key_prefix() {
+        let path = tmpfile("prefix");
+        let mut store = StateStore::open(&path).unwrap();
+        for k in ["gw::r1", "gw::r2", "openai::r1"] {
+            store.record_event(
+                k, "fired", "warning", 3.0, 2.0,
+                r#"{"rule":"r","target":"t","slo":"s","burn_rate":3.0,"threshold":2.0,"severity":"Warning","fired_at_unix":1,"message":"m"}"#,
+                1,
+            ).unwrap();
+        }
+        let gw_only = store.list_history(Some("gw::"), 100).unwrap();
+        assert_eq!(gw_only.len(), 2);
+        for r in &gw_only { assert!(r.key.starts_with("gw::")); }
+    }
+
+    #[test]
+    fn list_history_respects_limit() {
+        let path = tmpfile("limit");
+        let mut store = StateStore::open(&path).unwrap();
+        for i in 0..50u64 {
+            store.record_event(
+                "k", "fired", "warning", 1.0, 1.0,
+                r#"{"rule":"r","target":"t","slo":"s","burn_rate":1.0,"threshold":1.0,"severity":"Warning","fired_at_unix":0,"message":"m"}"#,
+                i,
+            ).unwrap();
+        }
+        let ten = store.list_history(None, 10).unwrap();
+        assert_eq!(ten.len(), 10);
+    }
+
+    #[test]
+    fn history_persists_across_reopen() {
+        let path = tmpfile("persist");
+        {
+            let mut store = StateStore::open(&path).unwrap();
+            store.record_event(
+                "gw::r1", "fired", "critical", 4.0, 2.0,
+                r#"{"rule":"r1","target":"gw","slo":"s","burn_rate":4.0,"threshold":2.0,"severity":"Critical","fired_at_unix":42,"message":"m"}"#,
+                42,
+            ).unwrap();
+        }
+        let store = StateStore::open(&path).unwrap();
+        let history = store.list_history(None, 100).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].burn_rate, 4.0);
+        assert_eq!(history[0].fired_at_unix, 42);
+    }
+
 }

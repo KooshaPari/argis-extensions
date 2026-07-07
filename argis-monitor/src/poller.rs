@@ -317,10 +317,34 @@ impl Monitor {
                     sustained_secs: tracker.sustained_for.as_secs(),
                 };
             }
+            // Capture fired-meta for the alert_history insert below.
+            let fired_meta = fired.last().map(|p| (p.rule.clone(), p.severity, p.burn_rate, p.threshold, p.fired_at_unix));
             // Persist outside the trackers lock to avoid contention.
             if let Some(s) = store.as_mut() {
                 if let Err(e) = s.save(&key, &snap) {
                     tracing::warn!(target = %target_name, rule = %rule.name, error = %e, "state store save failed");
+                }
+                if let Some((rule_name, severity, burn, threshold, ts)) = &fired_meta {
+                    let payload_json = serde_json::to_string(&serde_json::json!({
+                        "rule": rule_name,
+                        "target": target_name,
+                        "slo": &rule.slo,
+                        "burn_rate": burn,
+                        "threshold": threshold,
+                        "severity": format!("{:?}", severity).to_lowercase(),
+                        "fired_at_unix": ts,
+                    })).unwrap_or_default();
+                    let event = match snap.state {
+                        crate::alerts::AlertState::Ok => "resolved",
+                        _ => "fired",
+                    };
+                    let severity_str = format!("{:?}", severity).to_lowercase();
+                    if let Err(e) = s.record_event(
+                        &key, event, &severity_str,
+                        *burn, *threshold, &payload_json, *ts,
+                    ) {
+                        tracing::warn!(target = %target_name, rule = %rule_name, error = %e, "alert history record failed");
+                    }
                 }
             }
         }
