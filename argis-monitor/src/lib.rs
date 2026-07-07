@@ -47,11 +47,13 @@ pub mod metrics;
 pub mod poller;
 pub mod ring_buffer;
 pub mod slo;
+pub mod state_store;
 pub mod target;
 pub mod webhook;
 
 pub use alerts::{AlertPayload, AlertRule, AlertState, AlertStateTracker, Decision, Severity, WebhookTarget};
 pub use dashboard::{load_and_summarize, DashboardSummary};
+pub use state_store::{StateStore, TrackerSnapshot, StateStoreError};
 pub use config::{Config, SLO};
 pub use ring_buffer::{Bucket, RingBuffer};
 pub use target::Target;

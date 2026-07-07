@@ -45,6 +45,8 @@ anyhow = "1"
 # Tracing substrate (init + per-poll spans).
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# SQLite state store (alert state persistence). `bundled` = no system libsqlite.
+rusqlite = { version = "0.32", default-features = false, features = ["bundled"] }
 # Time math (SLO window math).
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 # Async-friendly intervals.

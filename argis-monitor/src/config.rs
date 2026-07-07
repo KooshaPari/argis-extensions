@@ -63,6 +63,15 @@ pub struct Config {
     /// Optional bearer token sent on every poll. Use for protected gateways.
     #[serde(default)]
     pub bearer_token: Option<String>,
+    /// Directory where the alert state store is persisted. Defaults to
+    /// `./data` relative to CWD; set to `None` to disable persistence
+    /// (useful in tests).
+    #[serde(default = "default_data_dir")]
+    pub data_dir: Option<std::path::PathBuf>,
+}
+
+fn default_data_dir() -> Option<std::path::PathBuf> {
+    Some(std::path::PathBuf::from("./data"))
 }
 
 fn default_poll_interval() -> Duration { Duration::from_secs(15) }
@@ -79,6 +88,7 @@ impl Default for Config {
             slos: vec![SLO::default()],
             alert_rules: Vec::new(),
             bearer_token: None,
+            data_dir: default_data_dir(),
         }
     }
 }
