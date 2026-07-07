@@ -87,7 +87,19 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
 
 async fn run_monitor(cfg: Config) -> anyhow::Result<()> {
     let monitor = Monitor::new(cfg.clone())?;
-    let _handle = exporter::serve(&cfg.exporter_addr, monitor.registry()).await?;
+    let registry = monitor.registry();
+    let _exp = exporter::serve(&cfg.exporter_addr, registry.clone()).await?;
+    if let Some(push_url) = cfg.push_url.clone() {
+        let job = cfg.push_job.clone()
+            .or_else(|| std::env::var("HOSTNAME").ok().filter(|s| !s.is_empty()))
+            .unwrap_or_else(|| "argis-monitor".to_string());
+        let instance = cfg.push_instance.clone()
+            .unwrap_or_else(|| format!("host-{}", std::process::id()));
+        let interval = std::time::Duration::from_secs(cfg.push_interval_secs);
+        tokio::spawn(async move {
+            argis_monitor::run_pusher(push_url, registry, interval, job, instance).await;
+        });
+    }
     monitor.run().await
 }
 

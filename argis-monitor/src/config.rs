@@ -68,7 +68,27 @@ pub struct Config {
     /// (useful in tests).
     #[serde(default = "default_data_dir")]
     pub data_dir: Option<std::path::PathBuf>,
+    /// Optional Pushgateway URL. When set, the monitor spawns a background
+    /// task that POSTs the registry contents every `push_interval_secs`
+    /// seconds. Useful for service-discovery-free topologies or for
+    /// forwarding to a downstream TSDB.
+    #[serde(default)]
+    pub push_url: Option<String>,
+    /// Push interval (seconds). Defaults to 15s (matches the default poll
+    /// interval). Ignored when `push_url` is None.
+    #[serde(default = "default_push_interval")]
+    pub push_interval_secs: u64,
+    /// Job label used in the Pushgateway URL path. Defaults to the host
+    /// name from `hostname` or "argis-monitor" if that fails.
+    #[serde(default)]
+    pub push_job: Option<String>,
+    /// Instance label used in the Pushgateway URL path. Defaults to
+    /// "host-{pid}" where {pid} is the current process id.
+    #[serde(default)]
+    pub push_instance: Option<String>,
 }
+
+fn default_push_interval() -> u64 { 15 }
 
 fn default_data_dir() -> Option<std::path::PathBuf> {
     Some(std::path::PathBuf::from("./data"))
@@ -89,6 +109,10 @@ impl Default for Config {
             alert_rules: Vec::new(),
             bearer_token: None,
             data_dir: default_data_dir(),
+            push_url: None,
+            push_interval_secs: default_push_interval(),
+            push_job: None,
+            push_instance: None,
         }
     }
 }
