@@ -19,6 +19,7 @@ use crate::metrics::{Metrics, Outcome, Sample};
 use crate::ring_buffer::RingBuffer;
 use crate::slo::{burn_rate, BurnWindow};
 use crate::target::Target;
+use crate::push;
 use crate::state_store::{StateStore, TrackerSnapshot};
 use crate::webhook;
 

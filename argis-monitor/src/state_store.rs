@@ -159,8 +159,6 @@ fn flatten(snap: &TrackerSnapshot) -> (&'static str, u64, u64) {
     }
 }
 
-static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
 #[cfg(test)]
 mod tests {
     use super::*;
