@@ -283,3 +283,46 @@ fn config_with_alert_rules_round_trips_yaml() {
     assert_eq!(back.alert_rules.len(), 1);
     assert_eq!(back.alert_rules[0].name, "r1");
 }
+
+
+#[test]
+fn grafana_dashboard_json_is_valid_and_references_all_metrics() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("dashboards")
+        .join("argis-monitor-dashboard.json");
+    let raw = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let v: serde_json::Value = serde_json::from_str(&raw)
+        .unwrap_or_else(|e| panic!("parse dashboard json: {e}"));
+
+    assert_eq!(v["title"], "argis-monitor");
+    let panels = v["panels"].as_array().expect("panels array");
+    assert!(panels.len() >= 8, "expected at least 8 panels, got {}", panels.len());
+
+    // Concatenate every PromQL expr across every panel target so we can
+    // grep for the metric names without parsing Grafana's tree.
+    let mut all_exprs = String::new();
+    for p in panels {
+        if let Some(targets) = p.get("targets").and_then(|t| t.as_array()) {
+            for t in targets {
+                if let Some(expr) = t.get("expr").and_then(|e| e.as_str()) {
+                    all_exprs.push_str(expr);
+                    all_exprs.push(' ');
+                }
+            }
+        }
+    }
+    for metric in [
+        "argis_monitor_up",
+        "argis_monitor_poll_errors_total",
+        "argis_monitor_poll_duration_seconds",
+        "argis_monitor_polls_total",
+        "argis_monitor_burn_rate",
+        "argis_monitor_slo_target",
+        "argis_monitor_last_poll_timestamp_seconds",
+        "argis_monitor_target_info",
+    ] {
+        assert!(all_exprs.contains(metric),
+                "dashboard does not reference metric `{metric}`; exprs: {all_exprs}");
+    }
+}

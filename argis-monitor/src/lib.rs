@@ -41,6 +41,7 @@
 
 pub mod alerts;
 pub mod config;
+pub mod dashboard;
 pub mod exporter;
 pub mod metrics;
 pub mod poller;
@@ -50,6 +51,7 @@ pub mod target;
 pub mod webhook;
 
 pub use alerts::{AlertPayload, AlertRule, AlertState, AlertStateTracker, Decision, Severity, WebhookTarget};
+pub use dashboard::{load_and_summarize, DashboardSummary};
 pub use config::{Config, SLO};
 pub use ring_buffer::{Bucket, RingBuffer};
 pub use target::Target;
