@@ -23,8 +23,12 @@ struct Cli {
 enum Cmd {
     /// Start the poll loop + exporter. Blocks until SIGINT/SIGTERM.
     Start {
+        /// Single-target shortcut. Equivalent to --targets gateway=<url>.
         #[arg(long, env = "ARGIS_MONITOR_TARGET")]
         target: Option<String>,
+        /// Multi-target form: NAME=URL repeated, e.g. --targets openai=http://a --targets anthropic=http://b
+        #[arg(long = "targets", value_name = "NAME=URL", env = "ARGIS_MONITOR_TARGETS")]
+        targets: Vec<String>,
         #[arg(long, env = "ARGIS_MONITOR_POLL_INTERVAL", default_value = "15")]
         poll_interval_secs: u64,
         #[arg(long, env = "ARGIS_MONITOR_EXPORTER_ADDR", default_value = "0.0.0.0:9090")]
@@ -34,6 +38,8 @@ enum Cmd {
     Once {
         #[arg(long, env = "ARGIS_MONITOR_TARGET")]
         target: Option<String>,
+        #[arg(long = "targets", value_name = "NAME=URL")]
+        targets: Vec<String>,
     },
     /// Validate a config file: parse it and print the resolved struct.
     ValidateConfig {
@@ -51,16 +57,16 @@ fn main() -> anyhow::Result<()> {
 
 async fn run(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
-        Cmd::Start { target, poll_interval_secs, exporter_addr } => {
+        Cmd::Start { target, targets, poll_interval_secs, exporter_addr } => {
             let mut cfg = load_config(cli.config.as_deref())?;
-            if let Some(t) = target { cfg.target = t; }
+            apply_cli_targets(&mut cfg, target, &targets);
             cfg.poll_interval = Duration::from_secs(poll_interval_secs);
             cfg.exporter_addr = exporter_addr;
             run_monitor(cfg).await
         }
-        Cmd::Once { target } => {
+        Cmd::Once { target, targets } => {
             let mut cfg = load_config(cli.config.as_deref())?;
-            if let Some(t) = target { cfg.target = t; }
+            apply_cli_targets(&mut cfg, target, &targets);
             let monitor = Monitor::new(cfg)?;
             let outcome = monitor.poll_once().await?;
             println!("{}", serde_json::to_string_pretty(&outcome)?);
@@ -98,4 +104,22 @@ fn init_tracing() {
         .with_target(false)
         .compact()
         .init();
+}
+
+
+/// Apply CLI --target / --targets NAME=URL onto a Config. Only used if the
+/// config came from the CLI (no config file), so it never overrides a
+/// YAML-defined target list silently.
+fn apply_cli_targets(cfg: &mut Config, target: Option<String>, targets: &[String]) {
+    if let Some(t) = target {
+        cfg.targets.clear();
+        cfg.targets.push(argis_monitor::Target::new("gateway", t));
+    }
+    for t in targets {
+        if let Some((name, url)) = t.split_once('=') {
+            cfg.targets.push(argis_monitor::Target::new(name, url));
+        } else {
+            tracing::warn!(target = %t, "ignoring malformed NAME=URL target");
+        }
+    }
 }

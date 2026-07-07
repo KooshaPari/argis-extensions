@@ -1,15 +1,27 @@
-# argis-monitor example config.
+# argis-monitor example config — slice 2 (multi-target + ring buffer).
 #
 # Use with:  argis-monitor --config examples/basic.yaml start
 #
-# All keys are optional except `target`.
+# Multiple targets => one tokio task each, isolated ring buffers, shared registry.
 
-target: http://127.0.0.1:8080
-poll_interval: 15s        # supports s/m/h/d suffixes
+poll_interval: 15s
 poll_timeout: 5s
 exporter_addr: 0.0.0.0:9090
 
 # bearer_token: ${BIFROST_ADMIN_TOKEN}
+
+targets:
+  - name: gateway
+    url: http://127.0.0.1:8080/health
+  - name: openai
+    url: https://api.openai.com/v1/models
+    poll_interval: 30s
+  - name: anthropic
+    url: https://api.anthropic.com/v1/models
+    poll_interval: 30s
+  - name: google
+    url: https://generativelanguage.googleapis.com/v1/models
+    poll_interval: 30s
 
 slos:
   - name: chat_completions_p99

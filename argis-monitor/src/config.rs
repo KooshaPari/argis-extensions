@@ -40,9 +40,12 @@ impl Default for SLO {
 /// Top-level configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    /// Base URL of the Bifrost gateway to poll (e.g. `http://127.0.0.1:8080`).
-    pub target: String,
-    /// How often to poll the gateway. Defaults to 15s.
+    /// Targets to poll. At least one required. The monitor spawns one tokio
+    /// task per target. Each target's `provider` label is its `name`.
+    #[serde(default)]
+    pub targets: Vec<crate::target::Target>,
+    /// How often to poll each target by default. Per-target overrides apply
+    /// if the target sets its own `poll_interval`.
     #[serde(default = "default_poll_interval", with = "seconds_as_duration")]
     pub poll_interval: Duration,
     /// How long a single HTTP poll may take before failing. Defaults to 5s.
@@ -66,7 +69,7 @@ fn default_exporter_addr() -> String { "0.0.0.0:9090".to_string() }
 impl Default for Config {
     fn default() -> Self {
         Self {
-            target: "http://127.0.0.1:8080".to_string(),
+            targets: vec![crate::target::Target::new("gateway", "http://127.0.0.1:8080")],
             poll_interval: default_poll_interval(),
             poll_timeout: default_poll_timeout(),
             exporter_addr: default_exporter_addr(),
@@ -77,9 +80,28 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Set the target gateway URL.
-    pub fn with_target(mut self, target: String) -> Self { self.target = target; self }
-    /// Set the poll interval.
+    /// Convenience: the first target's URL (or empty string if no targets).
+    pub fn first_url(&self) -> &str {
+        self.targets.first().map(|t| t.url.as_str()).unwrap_or("")
+    }
+    /// Set the first target's URL.
+    pub fn with_target_url(mut self, url: impl Into<String>) -> Self {
+        if let Some(t) = self.targets.first_mut() {
+            t.url = url.into();
+        } else {
+            self.targets.push(crate::target::Target::new("gateway", url.into()));
+        }
+        self
+    }
+    /// Add a target by name + URL.
+    pub fn with_target_named(mut self, name: impl Into<String>, url: impl Into<String>) -> Self {
+        self.targets.push(crate::target::Target::new(name, url.into()));
+        self
+    }
+}
+
+impl Config {
+    /// Set the poll interval (used when no per-target override is set).
     pub fn with_poll_interval_secs(mut self, secs: u64) -> Self {
         self.poll_interval = Duration::from_secs(secs); self
     }
@@ -122,5 +144,14 @@ mod seconds_as_duration {
             _ => return Err(format!("unknown duration unit: {unit}")),
         };
         Ok(Duration::from_secs(n * mul))
+    }
+}
+
+
+impl Config {
+    /// Convenience for tests: a single-target Config pointing at `target`.
+    #[doc(hidden)]
+    pub fn for_test(target: impl Into<String>) -> Self {
+        Self::default().with_target_url(target)
     }
 }

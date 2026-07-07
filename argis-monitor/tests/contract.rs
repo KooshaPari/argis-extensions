@@ -116,3 +116,76 @@ async fn multi_window_burn_reflects_error_traffic() {
     let outcome = monitor.poll_once().await.unwrap();
     assert!(outcome.burn_short > 0.0, "burn_short should rise after errors; got {}", outcome.burn_short);
 }
+
+
+// =====================================================================
+// Slice 2: multi-target + ring buffer
+// =====================================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn monitor_rejects_config_with_no_targets() {
+    let cfg = Config::default();
+    let bad_cfg = Config { targets: vec![], ..cfg };
+    let err = Monitor::new(bad_cfg).err().expect("expected an error from empty-targets Config");
+    assert!(matches!(err, argis_monitor::poller::PollError::NoTargets), "got: {err:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn monitor_polls_multiple_targets_in_isolation() {
+    let s1 = MockServer::start().await;
+    let s2 = MockServer::start().await;
+    Mock::given(method("GET")).respond_with(ResponseTemplate::new(200)).mount(&s1).await;
+    Mock::given(method("GET")).respond_with(ResponseTemplate::new(503)).mount(&s2).await;
+
+    let cfg = Config::default()
+        .with_target_named("healthy", s1.uri())
+        .with_target_named("broken", s2.uri());
+    let monitor = Monitor::new(cfg).unwrap();
+
+    let a = monitor.poll_once_target(&argis_monitor::Target::new("healthy", s1.uri()), std::time::Duration::from_secs(5)).await.unwrap();
+    let b = monitor.poll_once_target(&argis_monitor::Target::new("broken", s2.uri()), std::time::Duration::from_secs(5)).await.unwrap();
+
+    assert_eq!(a.sample.outcome, Outcome::Ok);
+    assert_eq!(a.sample.provider, "healthy");
+    assert_eq!(b.sample.outcome, Outcome::Error);
+    assert_eq!(b.sample.provider, "broken");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ring_buffer_excludes_stale_buckets_from_burn_rate() {
+    use argis_monitor::RingBuffer;
+
+    // 3600s total window, 60s buckets => 60 buckets.
+    let mut rb: RingBuffer = RingBuffer::with_bucket_size(3600, 60, 0);
+
+    // One success per minute for 60 minutes, anchored at t=0.
+    for i in 0..60u64 {
+        rb.record(true, i * 60);
+    }
+    // From t=3600 looking back the full 3600s window: every bucket is
+    // in-window and each holds exactly 1 success, so we see 60 successes.
+    let (s, _f) = rb.window(3600, 3600);
+    assert_eq!(s, 60, "all 60 successes should be in-window over the full 3600s");
+
+    // A trailing 120s window from t=3600 includes the two most-recent
+    // buckets (anchored at t=3480..3600).
+    let (s, f) = rb.window(120, 3600);
+    assert_eq!(s + f, 3, "trailing 120s window contains 3 buckets (inclusive boundary)");
+
+    // Now jump 30 minutes forward and record. The ring rotates 30 buckets,
+    // dropping the first 30 successes. The new record lands at bucket
+    // anchored at t=5400.
+    rb.record(true, 3600 + 30 * 60);
+    // From t=5400, the trailing 120s window contains only the new record.
+    let (s, f) = rb.window(120, 3600 + 30 * 60);
+    assert_eq!(s, 1, "after a 30-min jump, trailing 120s window has just the new record");
+    assert_eq!(f, 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn target_yaml_parses_poll_interval() {
+    let yaml = "name: openai\nurl: http://api.openai.com/v1/models\npoll_interval: 30s\n";
+    let t: argis_monitor::Target = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(t.name, "openai");
+    assert_eq!(t.poll_interval, Some(std::time::Duration::from_secs(30)));
+}

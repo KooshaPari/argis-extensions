@@ -25,7 +25,7 @@
 //! use argis_monitor::{Monitor, Config, SLO};
 //! # async fn run() -> anyhow::Result<()> {
 //! let monitor = Monitor::new(Config::default()
-//!     .with_target("http://127.0.0.1:8080".into())
+//!     .with_target_url("http://127.0.0.1:8080")
 //!     .with_poll_interval_secs(15)
 //!     .with_slo(SLO {
 //!         name: "chat_completions_p99".into(),
@@ -42,10 +42,14 @@
 pub mod config;
 pub mod metrics;
 pub mod poller;
+pub mod ring_buffer;
 pub mod slo;
+pub mod target;
 pub mod exporter;
 
 pub use config::{Config, SLO};
+pub use target::Target;
+pub use ring_buffer::{Bucket, RingBuffer};
 pub use metrics::{Outcome, Sample};
 pub use poller::{Monitor, PollError, PollOutcome};
 pub use slo::{burn_rate, BurnWindow};
