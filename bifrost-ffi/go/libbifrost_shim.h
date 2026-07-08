@@ -88,6 +88,8 @@ extern "C" {
 
 extern char* bifrost_version(void);
 extern int bifrost_provider_count(void);
+extern int bifrost_provider_names_count(void);
+extern char* bifrost_provider_name(int index);
 
 #ifdef __cplusplus
 }

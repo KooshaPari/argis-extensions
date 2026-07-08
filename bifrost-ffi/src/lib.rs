@@ -34,6 +34,11 @@ extern "C" {
     /// surface knows about (OpenAI, Anthropic, Gemini, Custom = 4 in the
     /// demo shim; the upstream package has many more).
     fn bifrost_provider_count() -> c_int;
+
+    /// Returns the i-th provider name as a heap-allocated C string
+    /// (caller must NOT free; stable for the lifetime of the process).
+    /// Index must be < bifrost_provider_count().
+    fn bifrost_provider_name(index: c_int) -> *const c_char;
 }
 
 /// Cached version string. Computed once on first use; the C side keeps
@@ -60,6 +65,24 @@ pub fn version() -> &'static str {
 /// Number of provider constants the vendored Bifrost surface ships.
 pub fn provider_count() -> i32 {
     unsafe { bifrost_provider_count() }
+}
+
+/// Names of the providers the vendored Bifrost surface ships, sorted.
+/// Returns a static Vec (lives for the process lifetime; the underlying
+/// C strings are owned by the Go runtime).
+pub fn provider_names() -> Vec<&'static str> {
+    let n = provider_count();
+    (0..n)
+        .map(|i| {
+            // SAFETY: each entry is a NUL-terminated C string owned by
+            // the Go runtime; the lifetime is `'static` for the process.
+            let ptr = unsafe { bifrost_provider_name(i as c_int) };
+            if ptr.is_null() {
+                return "";
+            }
+            unsafe { CStr::from_ptr(ptr) }.to_str().unwrap_or("")
+        })
+        .collect()
 }
 
 /// Convenience: returns the version plus the provider count as a
@@ -104,3 +127,14 @@ mod tests {
         assert_eq!(s1, s2);
     }
 }
+
+    #[test]
+    fn provider_names_returns_n_strings() {
+        let names = provider_names();
+        assert_eq!(names.len() as i32, provider_count());
+        assert!(!names.is_empty());
+        // All names should be non-empty.
+        for n in &names {
+            assert!(!n.is_empty(), "provider name should be non-empty: {n:?}");
+        }
+    }

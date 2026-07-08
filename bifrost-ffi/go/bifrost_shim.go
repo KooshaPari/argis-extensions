@@ -27,3 +27,32 @@ func bifrost_provider_count() C.int {
 }
 
 func main() {}
+
+
+//export bifrost_provider_names_count
+func bifrost_provider_names_count() C.int {
+	// The upstream package declares the canonical provider constants in
+	// the `Provider*` const block. We hardcode the count to match what's
+	// exported in schemas.go as of v1.2.30; future slices can call
+	// reflect on the upstream symbols dynamically.
+	return C.int(4) // OpenAI, Anthropic, Gemini, Custom
+}
+
+//export bifrost_provider_name
+func bifrost_provider_name(index C.int) *C.char {
+	// Hardcoded provider list in the demo shim. Future slices can switch
+	// to calling the upstream github.com/maximhq/bifrost/core/schemas
+	// package directly.
+	switch index {
+	case 0:
+		return C.CString("openai")
+	case 1:
+		return C.CString("anthropic")
+	case 2:
+		return C.CString("gemini")
+	case 3:
+		return C.CString("custom")
+	default:
+		return nil
+	}
+}
