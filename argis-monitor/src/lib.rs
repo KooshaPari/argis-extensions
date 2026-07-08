@@ -40,6 +40,7 @@
 
 
 pub mod alerts;
+pub mod migrations;
 pub mod aws_sigv4;
 pub mod config;
 pub mod dashboard;

@@ -67,8 +67,9 @@ impl StateStore {
                 ))
             })?;
         }
-        let conn = Connection::open(path)?;
-        conn.execute_batch(SCHEMA)?;
+        let mut conn = Connection::open(path)?;
+        crate::migrations::run(&mut conn).map_err(|e| StateStoreError::Sqlite(into_rusqlite(e)))?;
+        tracing::info!(version = crate::migrations::LATEST_VERSION, "migrations applied");
         Ok(Self { conn })
     }
 
@@ -174,29 +175,8 @@ impl StateStore {
     }
 }
 
-const SCHEMA: &str = r#"
-CREATE TABLE IF NOT EXISTS alert_state (
-    key             TEXT PRIMARY KEY,
-    state           TEXT NOT NULL,
-    since_unix      INTEGER NOT NULL,
-    last_fired_unix INTEGER NOT NULL DEFAULT 0,
-    sustained_secs  INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_alert_state_key ON alert_state(key);
-
-CREATE TABLE IF NOT EXISTS alert_history (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    key             TEXT NOT NULL,
-    event           TEXT NOT NULL,
-    severity        TEXT NOT NULL,
-    burn_rate       REAL NOT NULL,
-    threshold       REAL NOT NULL,
-    payload_json    TEXT NOT NULL,
-    fired_at_unix   INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_alert_history_key ON alert_history(key);
-CREATE INDEX IF NOT EXISTS idx_alert_history_fired_at ON alert_history(fired_at_unix);
-"#;
+// Schema migrations live in `migrations/` and are applied at startup
+// via `crate::migrations::run`. The old inline `SCHEMA` constant is gone.
 
 /// One row of alert history.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -435,4 +415,8 @@ mod tests {
         assert_eq!(history[0].fired_at_unix, 42);
     }
 
+}
+
+fn into_rusqlite(e: refinery::Error) -> rusqlite::Error {
+    rusqlite::Error::InvalidQuery
 }

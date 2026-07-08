@@ -380,3 +380,28 @@ async fn one_shot_suppression_window_does_not_match_outside_range() {
     let t_after = argis_monitor::suppression::unix_from_utc(2026, 7, 15, 5, 0, 0);
     assert!(is_suppressed(&[w], "any", "any", t_after).is_none());
 }
+
+#[test]
+fn migrations_v001_creates_fresh_schema() {
+    let dir = std::env::temp_dir().join(format!("argis-mig-{}-{}", std::process::id(), "v001"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("state.sqlite");
+    let _ = std::fs::remove_file(&path);
+
+    let mut store = argis_monitor::StateStore::open(&path).unwrap();
+    // SchemaVersion row + 2 tables should exist.
+    let count: i64 = {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table'", [], |r| r.get(0)).unwrap()
+    };
+    assert!(count >= 2, "expected at least 2 tables (alert_state + alert_history), got {count}");
+    // And we can save + load a tracker through it.
+    use argis_monitor::{AlertStateTracker, TrackerSnapshot};
+    use argis_monitor::alerts::AlertState;
+    let snap = TrackerSnapshot { state: AlertState::Ok, sustained_secs: 0 };
+    store.save("gw::r1", &snap).unwrap();
+    let restored = store.load_all().unwrap();
+    assert_eq!(restored.len(), 1);
+    assert_eq!(restored[0].0, "gw::r1");
+    let _ = std::fs::remove_dir_all(&dir);
+}

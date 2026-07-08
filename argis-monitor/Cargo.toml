@@ -52,6 +52,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 urlencoding = "2"
 # SQLite state store (alert state persistence). `bundled` = no system libsqlite.
 rusqlite = { version = "0.32", default-features = false, features = ["bundled"] }
+# Schema migrations (forward-only).
+refinery = { version = "0.8", features = ["rusqlite"] }
 # Time math (SLO window math).
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 # Async-friendly intervals.
