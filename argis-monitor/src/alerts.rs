@@ -18,6 +18,22 @@ pub struct WebhookTarget {
     pub url: String,
     #[serde(default)]
     pub headers: HashMap<String, String>,
+    /// When set, the request is signed with AWS SigV4 before being sent.
+    /// `aws_region` + `aws_service` (e.g. "sns", "events") + credentials.
+    /// Useful for SNS / EventBridge / Lambda webhook targets.
+    #[serde(default)]
+    pub aws_region: Option<String>,
+    #[serde(default)]
+    pub aws_service: Option<String>,
+    /// Inline credentials. If unset, the substrate reads from
+    /// `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`
+    /// environment variables.
+    #[serde(default)]
+    pub aws_access_key_id: Option<String>,
+    #[serde(default)]
+    pub aws_secret_access_key: Option<String>,
+    #[serde(default)]
+    pub aws_session_token: Option<String>,
 }
 
 /// One alert rule. Evaluated independently per (target x SLO).
