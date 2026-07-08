@@ -380,3 +380,81 @@ async fn one_shot_suppression_window_does_not_match_outside_range() {
     let t_after = argis_monitor::suppression::unix_from_utc(2026, 7, 15, 5, 0, 0);
     assert!(is_suppressed(&[w], "any", "any", t_after).is_none());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bearer_token_static_sent_as_authorization_header() {
+    use wiremock::matchers::{header, method, path};
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/alerts"))
+        .and(header("Authorization", "Bearer secret-token-123"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let client = reqwest::Client::new();
+    let target = argis_monitor::alerts::WebhookTarget {
+        url: format!("{}/alerts", server.uri()),
+        headers: Default::default(),
+        bearer_token: Some("secret-token-123".into()),
+        bearer_token_file: None,
+        bearer_token_refresh_secs: None,
+        ..Default::default()
+    };
+    let payload = argis_monitor::alerts::AlertPayload::firing("r", "gw", "s", 5.0, 2.0, 100);
+    let reports = argis_monitor::deliver_all(&client, &[target], &payload).await;
+    assert_eq!(reports.len(), 1);
+    assert!(reports[0].success);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bearer_token_file_reads_contents() {
+    use wiremock::matchers::{header, method, path};
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/alerts"))
+        .and(header("Authorization", "Bearer from-file-xyz"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let tmp = std::env::temp_dir().join(format!("argis-jwt-{}-{}", std::process::id(), "test"));
+    std::fs::create_dir_all(&tmp).unwrap();
+    let path = tmp.join("token");
+    std::fs::write(&path, b"from-file-xyz\n").unwrap();
+
+    let client = reqwest::Client::new();
+    let target = argis_monitor::alerts::WebhookTarget {
+        url: format!("{}/alerts", server.uri()),
+        headers: Default::default(),
+        bearer_token: None,
+        bearer_token_file: Some(path),
+        bearer_token_refresh_secs: Some(1),
+        ..Default::default()
+    };
+    let payload = argis_monitor::alerts::AlertPayload::firing("r", "gw", "s", 5.0, 2.0, 100);
+    let reports = argis_monitor::deliver_all(&client, &[target], &payload).await;
+    assert_eq!(reports.len(), 1);
+    assert!(reports[0].success, "expected success, got {:?}", reports[0]);
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bearer_token_file_missing_logs_no_panic() {
+    let client = reqwest::Client::new();
+    let target = argis_monitor::alerts::WebhookTarget {
+        url: "http://127.0.0.1:1/alerts".into(),
+        headers: Default::default(),
+        bearer_token: None,
+        bearer_token_file: Some("/nonexistent/path/to/token".into()),
+        bearer_token_refresh_secs: Some(60),
+        ..Default::default()
+    };
+    let payload = argis_monitor::alerts::AlertPayload::firing("r", "gw", "s", 5.0, 2.0, 100);
+    // Should not panic; just fail gracefully.
+    let reports = argis_monitor::deliver_all(&client, &[target], &payload).await;
+    assert_eq!(reports.len(), 1);
+    assert!(!reports[0].success);
+    assert!(reports[0].error.is_some());
+}

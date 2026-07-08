@@ -79,6 +79,29 @@ async fn deliver_one(http: &reqwest::Client, target: &WebhookTarget, payload: &A
                 }
             }
         }
+        // bearer_token / bearer_token_file (slice 10d).
+        if target.bearer_token.is_some() || target.bearer_token_file.is_some() {
+            // No global cache yet; re-resolve per request. Cheap (Option<String>).
+            // A process-global cache is in src/auth.rs::BearerTokenCache for future use.
+            let resolved = if let Some(path) = &target.bearer_token_file {
+                match tokio::fs::read(path).await {
+                    Ok(b) => Some(String::from_utf8_lossy(&b).trim().to_string()),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "bearer_token_file read failed; skipping delivery");
+                        None
+                    }
+                }
+            } else {
+                target.bearer_token.clone()
+            };
+            if let Some(token) = resolved {
+                if let Ok(val) = reqwest::header::HeaderValue::from_str(&format!("Bearer {token}")) {
+                    req.headers_mut().insert(reqwest::header::AUTHORIZATION, val);
+                }
+            } else {
+                return DeliveryReport { url: target.url.clone(), success: false, status: None, error: Some("bearer_token_file read failed".into()) };
+            }
+        }
         // SigV4 signing (if AWS config present).
         if target.aws_region.is_some() && target.aws_service.is_some() {
             let creds = crate::aws_sigv4::AwsCreds {

@@ -40,6 +40,7 @@
 
 
 pub mod alerts;
+pub mod auth;
 pub mod aws_sigv4;
 pub mod config;
 pub mod dashboard;
@@ -59,6 +60,7 @@ pub use dashboard::{load_and_summarize, DashboardSummary};
 pub use push::{push_to, run_pusher, PushError};
 pub use state_store::{AlertHistoryRow, StateStore, TrackerSnapshot, StateStoreError};
 pub use suppression::{is_suppressed, Day, WindowSpec};
+pub use auth::BearerTokenCache;
 pub use aws_sigv4::{sign_request_headers, SignError};
 pub use config::{Config, SLO};
 pub use ring_buffer::{Bucket, RingBuffer};

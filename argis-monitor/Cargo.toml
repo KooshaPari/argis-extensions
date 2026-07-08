@@ -25,7 +25,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Async runtime (pollers + axum server).
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal", "fs"] }
 # HTTP client for polling the Bifrost gateway.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 # AWS SigV4 signing (hand-rolled). Crypto primitives.
