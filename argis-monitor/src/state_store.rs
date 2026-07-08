@@ -25,6 +25,7 @@
 use std::path::Path;
 
 use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::alerts::AlertState;
@@ -435,4 +436,53 @@ mod tests {
         assert_eq!(history[0].fired_at_unix, 42);
     }
 
+}
+
+impl StateStore {
+    /// Delete history rows older than `older_than_unix` (Unix seconds).
+    /// Also deletes `alert_state` rows whose `since_unix` is older than
+    /// the threshold (a stale state machine is no longer active and will
+    /// be re-created on the next fire if needed).
+    pub fn prune(&mut self, older_than_unix: u64) -> Result<PruneReport, StateStoreError> {
+        // u64 -> i64 cast overflows for values > i64::MAX. Saturate.
+        let threshold: i64 = if older_than_unix > i64::MAX as u64 {
+            i64::MAX
+        } else {
+            older_than_unix as i64
+        };
+        let history_deleted = self.conn.execute(
+            "DELETE FROM alert_history WHERE fired_at_unix < ?1",
+            rusqlite::params![threshold],
+        )?;
+        let state_deleted = self.conn.execute(
+            "DELETE FROM alert_state WHERE since_unix < ?1",
+            rusqlite::params![threshold],
+        )?;
+        Ok(PruneReport {
+            alert_history_deleted: history_deleted as u64,
+            alert_state_deleted: state_deleted as u64,
+        })
+    }
+
+    /// Count history rows older than `older_than_unix` without deleting.
+    pub fn count_history_before(&self, older_than_unix: u64) -> Result<u64, StateStoreError> {
+        // u64 -> i64 cast overflows for values > i64::MAX. Saturate.
+        let threshold: i64 = if older_than_unix > i64::MAX as u64 {
+            i64::MAX
+        } else {
+            older_than_unix as i64
+        };
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM alert_history WHERE fired_at_unix < ?1",
+            rusqlite::params![threshold],
+            |row| row.get(0),
+        )?;
+        Ok(n as u64)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PruneReport {
+    pub alert_history_deleted: u64,
+    pub alert_state_deleted: u64,
 }

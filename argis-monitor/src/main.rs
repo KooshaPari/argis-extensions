@@ -6,7 +6,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
-use argis_monitor::{exporter, Config, Monitor};
+use argis_monitor::{exporter, Config, Monitor, StateStore};
 
 #[derive(Debug, Parser)]
 #[command(name = "argis-monitor", version, about = "Observable Integration substrate for bifrost-extensions (Tenet 4).")]
@@ -46,6 +46,17 @@ enum Cmd {
         #[arg(long)]
         config: PathBuf,
     },
+    /// Prune alert_history + alert_state rows older than the threshold.
+    Prune {
+        #[arg(long, global = true, env = "ARGIS_MONITOR_CONFIG")]
+        config: Option<PathBuf>,
+        #[arg(long, env = "ARGIS_MONITOR_DATA_DIR")]
+        data_dir: Option<PathBuf>,
+        #[arg(long)]
+        older_than_days: u64,
+        #[arg(long, action = clap::ArgAction::SetTrue)]
+        dry_run: bool,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -81,6 +92,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             let cfg = load_config(Some(&config))?;
             println!("{}", serde_json::to_string_pretty(&cfg)?);
             Ok(())
+        }
+        Cmd::Prune { config, data_dir, older_than_days, dry_run } => {
+            run_prune(config, data_dir, older_than_days, dry_run)
         }
     }
 }
@@ -139,4 +153,35 @@ fn apply_cli_targets(cfg: &mut Config, target: Option<String>, targets: &[String
             tracing::warn!(target = %t, "ignoring malformed NAME=URL target");
         }
     }
+}
+
+fn run_prune(config_path: Option<PathBuf>, data_dir: Option<PathBuf>, days: u64, dry_run: bool) -> anyhow::Result<()> {
+    let dir = if let Some(d) = data_dir {
+        d
+    } else if let Some(c) = config_path {
+        let cfg = load_config(Some(&c))?;
+        cfg.data_dir.unwrap_or_else(|| std::path::PathBuf::from("./data"))
+    } else {
+        std::path::PathBuf::from("./data")
+    };
+    let db = dir.join("alert_state.sqlite");
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    let threshold = now.saturating_sub(days * 86_400);
+    if !db.exists() {
+        println!("No state store at {}; nothing to prune.", db.display());
+        return Ok(());
+    }
+    let mut store = StateStore::open(&db)?;
+    let would_delete = store.count_history_before(threshold)?;
+    let chrono_date = chrono::DateTime::<chrono::Utc>::from_timestamp(threshold as i64, 0)
+        .map(|dt| dt.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| threshold.to_string());
+    if dry_run {
+        println!("Would delete {} rows from alert_history (rows older than {})", would_delete, chrono_date);
+        return Ok(());
+    }
+    let report = store.prune(threshold)?;
+    println!("Deleted {} rows from alert_history, {} rows from alert_state (rows older than {})",
+             report.alert_history_deleted, report.alert_state_deleted, chrono_date);
+    Ok(())
 }

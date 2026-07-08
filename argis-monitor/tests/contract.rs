@@ -380,3 +380,27 @@ async fn one_shot_suppression_window_does_not_match_outside_range() {
     let t_after = argis_monitor::suppression::unix_from_utc(2026, 7, 15, 5, 0, 0);
     assert!(is_suppressed(&[w], "any", "any", t_after).is_none());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prune_removes_old_history_keeps_recent() {
+    let dir = std::env::temp_dir().join(format!("argis-prune-{}-{}", std::process::id(), "hist"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("state.sqlite");
+    let _ = std::fs::remove_file(&path);
+    let now = 1_700_000_000u64;
+    let mut store = argis_monitor::StateStore::open(&path).unwrap();
+    // Insert 5 events: 3 old, 2 recent.
+    for i in 0..3u64 {
+        store.record_event("gw::r", "fired", "warning", 1.0, 1.0, "{}", now - 86_400 * (i + 5)).unwrap();
+    }
+    for i in 0..2u64 {
+        store.record_event("gw::r", "fired", "warning", 1.0, 1.0, "{}", now - i).unwrap();
+    }
+    let threshold = now - 86_400; // older than 1 day
+    let report = store.prune(threshold).unwrap();
+    assert_eq!(report.alert_history_deleted, 3, "should delete 3 old");
+    assert_eq!(report.alert_state_deleted, 0, "no state rows");
+    let remaining = store.count_history_before(u64::MAX).unwrap();
+    assert_eq!(remaining, 2, "2 recent rows should remain");
+    let _ = std::fs::remove_dir_all(&dir);
+}
