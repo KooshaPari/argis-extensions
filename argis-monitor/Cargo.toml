@@ -28,6 +28,9 @@ path = "src/main.rs"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
 # HTTP client for polling the Bifrost gateway.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+# AWS SigV4 signing (hand-rolled). Crypto primitives.
+hmac = "0.12"
+sha2 = "0.10"
 # HTTP server exposing the Prometheus /metrics endpoint.
 axum = "0.8"
 tower = "0.5"

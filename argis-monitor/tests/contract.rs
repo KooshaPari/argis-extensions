@@ -236,6 +236,7 @@ async fn webhook_posts_payload_as_json() {
     let target = argis_monitor::alerts::WebhookTarget {
         url: format!("{}/alerts", server.uri()),
         headers: Default::default(),
+        ..Default::default()
     };
     let payload = argis_monitor::alerts::AlertPayload::firing("r", "gateway", "s", 5.0, 2.0, 12345);
     let reports = argis_monitor::deliver_all(&client, &[target], &payload).await;
@@ -258,6 +259,7 @@ async fn webhook_records_failure_on_5xx() {
     let target = argis_monitor::alerts::WebhookTarget {
         url: format!("{}/alerts", server.uri()),
         headers: Default::default(),
+        ..Default::default()
     };
     let payload = argis_monitor::alerts::AlertPayload::firing("r", "gateway", "s", 5.0, 2.0, 12345);
     let reports = argis_monitor::deliver_all(&client, &[target], &payload).await;

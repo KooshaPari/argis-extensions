@@ -4,8 +4,16 @@
 //! webhook URL. Delivery is best-effort: a single retry with exponential
 //! backoff, then drop. Failed deliveries are logged but do not affect the
 //! alert state machine.
+//!
+//! When the WebhookTarget carries AWS credentials, the request is signed
+//! with AWS SigV4 (see `crate::aws_sigv4`) before being sent. This is
+//! required for SNS / EventBridge / Lambda webhook targets.
 
 use std::time::Duration;
+
+fn headers_mut_insert(h: &mut reqwest::header::HeaderMap, name: reqwest::header::HeaderName, val: reqwest::header::HeaderValue) {
+    h.insert(name, val);
+}
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -49,16 +57,61 @@ async fn deliver_one(http: &reqwest::Client, target: &WebhookTarget, payload: &A
     let mut last_err = None;
     let mut last_status = None;
     for attempt in 0..2u8 {
-        let mut req = match http.post(&target.url).json(payload).build() {
+        let body = match serde_json::to_vec(payload) {
+            Ok(b) => b,
+            Err(e) => { last_err = Some(format!("serialize: {e}")); continue; }
+        };
+        let mut req = match http.post(&target.url)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body.clone())
+            .build() {
             Ok(r) => r,
             Err(e) => { last_err = Some(format!("build: {e}")); continue; }
         };
-        // apply headers
-        let headers = req.headers_mut();
-        for (k, v) in &target.headers {
-            if let Ok(name) = reqwest::header::HeaderName::from_bytes(k.as_bytes()) {
-                if let Ok(val) = reqwest::header::HeaderValue::from_str(v) {
-                    headers.insert(name, val);
+        // apply user-supplied headers
+        {
+            let headers = req.headers_mut();
+            for (k, v) in &target.headers {
+                if let Ok(name) = reqwest::header::HeaderName::from_bytes(k.as_bytes()) {
+                    if let Ok(val) = reqwest::header::HeaderValue::from_str(v) {
+                        headers.insert(name, val);
+                    }
+                }
+            }
+        }
+        // SigV4 signing (if AWS config present).
+        if target.aws_region.is_some() && target.aws_service.is_some() {
+            let creds = crate::aws_sigv4::AwsCreds {
+                access_key: target.aws_access_key_id.clone()
+                    .or_else(|| std::env::var("AWS_ACCESS_KEY_ID").ok())
+                    .unwrap_or_default(),
+                secret_key: target.aws_secret_access_key.clone()
+                    .or_else(|| std::env::var("AWS_SECRET_ACCESS_KEY").ok())
+                    .unwrap_or_default(),
+                session_token: target.aws_session_token.clone()
+                    .or_else(|| std::env::var("AWS_SESSION_TOKEN").ok()),
+            };
+            match crate::aws_sigv4::sign_request_headers(
+                "POST",
+                &target.url,
+                Some(&body),
+                target.aws_region.as_deref().unwrap_or("us-east-1"),
+                target.aws_service.as_deref().unwrap(),
+                &creds,
+            ) {
+                Ok(sig) => {
+                    let h = req.headers_mut();
+                    for (k, v) in sig {
+                        if let Ok(name) = reqwest::header::HeaderName::from_bytes(k.as_bytes()) {
+                            if let Ok(val) = reqwest::header::HeaderValue::from_str(&v) {
+                                headers_mut_insert(h, name, val);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    last_err = Some(format!("aws sign: {e}"));
+                    continue;
                 }
             }
         }
