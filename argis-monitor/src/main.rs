@@ -4,9 +4,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
-use argis_monitor::{exporter, Config, Monitor};
+use argis_monitor::{exporter, run_pusher, Config, Monitor, StateStore};
 
 #[derive(Debug, Parser)]
 #[command(name = "argis-monitor", version, about = "Observable Integration substrate for bifrost-extensions (Tenet 4).")]
@@ -67,7 +68,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             if exporter_addr != "0.0.0.0:9090" {
                 cfg.exporter_addr = exporter_addr;
             }
-            run_monitor(cfg).await
+            run_monitor(cfg, cli.config).await
         }
         Cmd::Once { target, targets } => {
             let mut cfg = load_config(cli.config.as_deref())?;
@@ -85,7 +86,9 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     }
 }
 
-async fn run_monitor(cfg: Config) -> anyhow::Result<()> {
+
+
+async fn run_monitor(cfg: Config, config_path: Option<std::path::PathBuf>) -> anyhow::Result<()> {
     let monitor = Monitor::new(cfg.clone())?;
     let registry = monitor.registry();
     let _exp = exporter::serve(&cfg.exporter_addr, registry.clone()).await?;
@@ -97,7 +100,22 @@ async fn run_monitor(cfg: Config) -> anyhow::Result<()> {
             .unwrap_or_else(|| format!("host-{}", std::process::id()));
         let interval = std::time::Duration::from_secs(cfg.push_interval_secs);
         tokio::spawn(async move {
-            argis_monitor::run_pusher(push_url, registry, interval, job, instance).await;
+            run_pusher(push_url, registry, interval, job, instance).await;
+        });
+    }
+    // SIGHUP listener for hot-reload (slice 10c).
+    if let Some(path) = config_path.clone() {
+        let monitor_for_signal = monitor.clone();
+        let path_for_signal = path.clone();
+        tokio::spawn(async move {
+            if let Ok(mut sighup) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) {
+                while sighup.recv().await.is_some() {
+                    info!(path = %path_for_signal.display(), "SIGHUP received; reloading config");
+                    if let Err(e) = monitor_for_signal.reload_from_path(&path_for_signal).await {
+                        error!(error = %e, "reload failed");
+                    }
+                }
+            }
         });
     }
     monitor.run().await

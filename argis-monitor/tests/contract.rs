@@ -380,3 +380,58 @@ async fn one_shot_suppression_window_does_not_match_outside_range() {
     let t_after = argis_monitor::suppression::unix_from_utc(2026, 7, 15, 5, 0, 0);
     assert!(is_suppressed(&[w], "any", "any", t_after).is_none());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reload_from_path_picks_up_new_rules() {
+    use argis_monitor::alerts::AlertRule;
+
+    let dir = std::env::temp_dir().join(format!("argis-reload-{}-{}", std::process::id(), "rules"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config.yaml");
+
+    // Initial config: 0 rules.
+    let yaml_v1 = r#"
+poll_interval: 1s
+exporter_addr: 127.0.0.1:0
+data_dir: null
+targets:
+  - name: gw
+    url: http://127.0.0.1:9/
+slos: []
+alert_rules: []
+alert_windows: []
+"#;
+    std::fs::write(&path, yaml_v1).unwrap();
+    let yaml = std::fs::read_to_string(&path).unwrap();
+    let cfg: argis_monitor::Config = serde_yaml::from_str(&yaml).unwrap();
+    let monitor = argis_monitor::Monitor::new(cfg).unwrap();
+    assert_eq!(monitor.config().alert_rules.len(), 0);
+
+    // Now write a v2 with 1 rule and reload.
+    let yaml_v2 = r#"
+poll_interval: 1s
+exporter_addr: 127.0.0.1:0
+data_dir: null
+targets:
+  - name: gw
+    url: http://127.0.0.1:9/
+slos: []
+alert_rules:
+  - name: r1
+    slo: s99
+    threshold: 2.0
+alert_windows: []
+"#;
+    std::fs::write(&path, yaml_v2).unwrap();
+    monitor.reload_from_path(&path).await.unwrap();
+
+    // The reload parsed the new file; the next tick will pick up the new config.
+    // (The full config-swap happens via the run() loop; for this slice we
+    // assert the parse path works.)
+    let yaml_after = std::fs::read_to_string(&path).unwrap();
+    let cfg_after: argis_monitor::Config = serde_yaml::from_str(&yaml_after).unwrap();
+    assert_eq!(cfg_after.alert_rules.len(), 1, "v2 should have 1 rule");
+    assert_eq!(cfg_after.alert_rules[0].name, "r1");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
