@@ -43,6 +43,11 @@ extern "C" {
     /// Returns a heap-allocated C string with a sample Bifrost Account
     /// (proves the wrap pattern works against the full upstream package).
     fn bifrost_schema_dump() -> *const c_char;
+
+    /// Real chat completion: returns a JSON blob with the request and
+    /// response (echoes the prompt; a real provider would call the API).
+    /// The Rust side parses the JSON to extract the response content.
+    fn bifrost_chat_completion(model: *const c_char, prompt: *const c_char) -> *const c_char;
 }
 
 /// Cached version string. Computed once on first use; the C side keeps
@@ -168,4 +173,61 @@ pub fn schema_dump() -> &'static str {
         assert!(d.contains("acc-001"), "schema_dump should mention acc-001, got: {d}");
         // The real upstream package's ProviderOpenAI const is "openai".
         assert!(d.contains("openai"), "schema_dump should mention openai, got: {d}");
+    }
+
+/// JSON envelope returned by `bifrost_chat_completion`.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ChatCompletionEnvelope {
+    pub request: serde_json::Value,
+    pub response: serde_json::Value,
+}
+
+impl ChatCompletionEnvelope {
+    pub fn content(&self) -> Option<&str> {
+        self.response.get("completion_response")
+            .and_then(|cr| cr.get("content"))
+            .and_then(|c| c.as_str())
+    }
+}
+
+/// Run a chat completion against the vendored Bifrost (mocked echo provider).
+/// The Go side constructs a real `schemas.CompletionRequest` and returns a
+/// real `schemas.BifrostResponse` (echo content), serialized as JSON.
+pub fn chat_completion(model: &str, prompt: &str) -> Result<ChatCompletionEnvelope, String> {
+    let m = CString::new(model).map_err(|e| e.to_string())?;
+    let p = CString::new(prompt).map_err(|e| e.to_string())?;
+    // SAFETY: the Go side returns a heap-allocated C string that is valid
+    // for the lifetime of the process; the buffer is owned by the Go
+    // runtime, not Rust.
+    let ptr = unsafe { bifrost_chat_completion(m.as_ptr(), p.as_ptr()) };
+    if ptr.is_null() {
+        return Err("chat_completion returned null".into());
+    }
+    let raw = unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned();
+    serde_json::from_str(&raw).map_err(|e| format!("invalid json from FFI: {e}: {raw}"))
+}
+    #[test]
+    fn chat_completion_returns_echo_of_prompt() {
+        let env = chat_completion("gpt-4o-mini", "hello world").expect("chat_completion");
+        // The request should carry our model + prompt.
+        assert_eq!(env.request.get("model").and_then(|v| v.as_str()), Some("gpt-4o-mini"));
+        let msgs = env.request.get("messages").and_then(|v| v.as_array()).expect("messages array");
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].get("role").and_then(|v| v.as_str()), Some("user"));
+        assert_eq!(msgs[0].get("content").and_then(|v| v.as_str()), Some("hello world"));
+        // The response should echo the prompt.
+        assert_eq!(env.content(), Some("echo: hello world"));
+    }
+
+    #[test]
+    fn chat_completion_preserves_model() {
+        let env = chat_completion("claude-opus-4", "ping").expect("chat_completion");
+        assert_eq!(env.request.get("model").and_then(|v| v.as_str()), Some("claude-opus-4"));
+        assert_eq!(env.content(), Some("echo: ping"));
+    }
+
+    #[test]
+    fn chat_completion_handles_empty_prompt() {
+        let env = chat_completion("gpt-4", "").expect("chat_completion");
+        assert_eq!(env.content(), Some("echo: "));
     }

@@ -9,6 +9,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/maximhq/bifrost/core/schemas"
@@ -19,24 +20,16 @@ import "C"
 
 //export bifrost_version
 func bifrost_version() *C.char {
-	return C.CString("bifrost-ffi v0.2.0 (vendored from maximhq/bifrost/core v1.2.30)")
+	return C.CString("bifrost-ffi v0.3.0 (vendored from maximhq/bifrost/core v1.2.30)")
 }
 
 //export bifrost_provider_count
 func bifrost_provider_count() C.int {
-	// Return the count of provider constants declared in the upstream
-	// schemas package. The hardcoded list is small (4 in v1.2.30); future
-	// slices can replace this with a dynamic count via reflection on the
-	// upstream symbols.
 	return C.int(4)
 }
 
 //export bifrost_provider_name
 func bifrost_provider_name(index C.int) *C.char {
-	// Read directly from the upstream schemas package, not from a
-	// local hardcoded list. The vendored copy of
-	// github.com/maximhq/bifrost/core at v1.2.30 declares these four
-	// constants in the schemas.Provider const block.
 	switch index {
 	case 0:
 		return C.CString(string(schemas.ProviderOpenAI))
@@ -53,10 +46,6 @@ func bifrost_provider_name(index C.int) *C.char {
 
 //export bifrost_schema_dump
 func bifrost_schema_dump() *C.char {
-	// Demonstrates calling into a real upstream function: schema.Account
-	// is a struct from the vendored package. We return a small JSON
-	// representation of a sample account. This is the test of whether
-	// the wrap pattern works against the real Bifrost Go code.
 	sample := schemas.Account{
 		ID:              "acc-001",
 		Name:            "argis-monitor demo",
@@ -68,6 +57,60 @@ func bifrost_schema_dump() *C.char {
 		"id=%s name=%q email=%q providers=%v default=%s",
 		sample.ID, sample.Name, sample.Email, sample.Providers, sample.DefaultProvider,
 	))
+}
+
+//export bifrost_chat_completion
+func bifrost_chat_completion(model *C.char, prompt *C.char) *C.char {
+	// Real chat completion using the upstream schemas.CompletionRequest
+	// and schemas.CompletionResponse types. This is the test of the wrap
+	// pattern's most production-relevant path: the actual LLM gateway
+	// request/response cycle (modulo the actual HTTP call to a real
+	// provider, which is mocked here for hermetic testing).
+	modelStr := C.GoString(model)
+	promptStr := C.GoString(prompt)
+
+	// Build a real CompletionRequest using the upstream type. The content
+	// array is one user message with the prompt text.
+	req := schemas.CompletionRequest{
+		
+		Model:    modelStr,
+		Messages: []schemas.Message{
+			{
+				Role:    "user",
+				Content: promptStr,
+			},
+		},
+	}
+
+	// A real CompletionResponse matching the upstream schema. The mock
+	// just echoes the prompt back; a real provider would call the API.
+	resp := schemas.CompletionResponse{
+		ID:      "chatcmpl-argis-monitor-demo",
+		Content: "echo: " + promptStr,
+		Model:   modelStr,
+		Usage: schemas.Usage{
+			PromptTokens:     len(promptStr),
+			CompletionTokens: len(promptStr) + 6,
+			TotalTokens:      2*len(promptStr) + 6,
+		},
+	}
+
+	// Wrap in a BifrostResponse to match the real API surface.
+	br := schemas.BifrostResponse{
+		CompletionResponse: &resp,
+	}
+
+	// Serialize the FULL request and the FULL response as JSON so the
+	// Rust side can inspect both. A real integration would parse these
+	// back into the matching Rust types.
+	raw, err := json.MarshalIndent(struct {
+		Request  schemas.CompletionRequest  `json:"request"`
+		Response schemas.BifrostResponse     `json:"response"`
+	}{req, br}, "", "  ")
+	if err != nil {
+		return C.CString(fmt.Sprintf("error: %v", err))
+	}
+	return C.CString(string(raw))
 }
 
 func main() {}

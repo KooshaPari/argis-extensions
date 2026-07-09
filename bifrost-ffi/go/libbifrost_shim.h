@@ -21,7 +21,7 @@ extern const char *_GoStringPtr(_GoString_ s);
 /* Start of preamble from import "C" comments.  */
 
 
-#line 17 "bifrost_shim.go"
+#line 18 "bifrost_shim.go"
  #include <stdint.h>
 
 #line 1 "cgo-generated-wrapper"
@@ -90,6 +90,7 @@ extern char* bifrost_version(void);
 extern int bifrost_provider_count(void);
 extern char* bifrost_provider_name(int index);
 extern char* bifrost_schema_dump(void);
+extern char* bifrost_chat_completion(char* model, char* prompt);
 
 #ifdef __cplusplus
 }
