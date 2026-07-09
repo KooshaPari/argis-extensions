@@ -63,6 +63,17 @@ pub struct Config {
     /// Optional bearer token sent on every poll. Use for protected gateways.
     #[serde(default)]
     pub bearer_token: Option<String>,
+    /// OTLP/gRPC endpoint for OpenTelemetry export. When set, the monitor
+    /// installs a global tracer that bridges tracing -> OTel and exports
+    /// spans to this endpoint. Format: full OTLP/gRPC URL, e.g.
+    /// `http://otelcol:4317`. When unset, the monitor uses the plain
+    /// `tracing-subscriber` from `init_tracing()` (no OTel).
+    #[serde(default)]
+    pub otlp_endpoint: Option<String>,
+    /// OTel service name. Defaults to "argis-monitor". Only used when
+    /// `otlp_endpoint` is set.
+    #[serde(default)]
+    pub otlp_service_name: Option<String>,
     /// Suppression windows. When an alert would fire, the matcher is checked
     /// against `(target_name, rule_name, now)`; any matching window swallows
     /// the webhook delivery but still records the state transition.
@@ -119,6 +130,8 @@ impl Default for Config {
             push_job: None,
             push_instance: None,
             alert_windows: Vec::new(),
+            otlp_endpoint: None,
+            otlp_service_name: None,
         }
     }
 }

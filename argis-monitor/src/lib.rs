@@ -51,6 +51,7 @@ pub mod push;
 pub mod ring_buffer;
 pub mod slo;
 pub mod state_store;
+pub mod telemetry;
 pub mod suppression;
 pub mod target;
 pub mod webhook;

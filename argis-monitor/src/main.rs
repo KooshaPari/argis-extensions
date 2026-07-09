@@ -49,13 +49,14 @@ enum Cmd {
 }
 
 fn main() -> anyhow::Result<()> {
-    init_tracing();
     let cli = Cli::parse();
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     rt.block_on(run(cli))
 }
 
 async fn run(cli: Cli) -> anyhow::Result<()> {
+    let cfg = load_config(cli.config.as_deref()).ok();
+    init_tracing();
     match cli.command {
         Cmd::Start { target, targets, poll_interval_secs, exporter_addr } => {
             let mut cfg = load_config(cli.config.as_deref())?;
@@ -111,6 +112,16 @@ fn load_config(path: Option<&std::path::Path>) -> anyhow::Result<Config> {
         Ok(cfg)
     } else {
         Ok(Config::default())
+    }
+}
+
+fn init_otlp(cfg: &Config) {
+    if let Some(endpoint) = &cfg.otlp_endpoint {
+        let service = cfg.otlp_service_name.clone()
+            .unwrap_or_else(|| "argis-monitor".to_string());
+        if let Err(e) = argis_monitor::telemetry::init_otlp(&service, endpoint) {
+            tracing::warn!(error = %e, "OTLP init failed; continuing with plain tracing");
+        }
     }
 }
 

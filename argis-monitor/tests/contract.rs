@@ -458,3 +458,11 @@ async fn bearer_token_file_missing_logs_no_panic() {
     assert!(!reports[0].success);
     assert!(reports[0].error.is_some());
 }
+
+#[test]
+fn telemetry_module_exposes_init_and_shutdown() {
+    // We can't actually init OTel (it'd try to connect to a real endpoint),
+    // but we can verify the symbols exist.
+    let _: fn(&str, &str) -> Result<(), String> = argis_monitor::telemetry::init_otlp;
+    let _: fn() = argis_monitor::telemetry::shutdown;
+}
