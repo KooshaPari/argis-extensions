@@ -48,6 +48,8 @@ anyhow = "1"
 # Tracing substrate (init + per-poll spans).
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# Vendored Bifrost FFI integration (slice 13: wire into main binary).
+argis-bifrost-ffi = { path = "../bifrost-ffi" }
 # Pushgateway wire-format encoder.
 urlencoding = "2"
 # SQLite state store (alert state persistence). `bundled` = no system libsqlite.

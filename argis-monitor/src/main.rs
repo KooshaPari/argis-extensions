@@ -50,6 +50,7 @@ enum Cmd {
 
 fn main() -> anyhow::Result<()> {
     init_tracing();
+    bifrost_banner();
     let cli = Cli::parse();
     let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     rt.block_on(run(cli))
@@ -112,6 +113,16 @@ fn load_config(path: Option<&std::path::Path>) -> anyhow::Result<Config> {
     } else {
         Ok(Config::default())
     }
+}
+
+fn bifrost_banner() {
+    use argis_bifrost_ffi;
+    tracing::info!(
+        version = argis_bifrost_ffi::version(),
+        providers = argis_bifrost_ffi::provider_count(),
+        names = ?argis_bifrost_ffi::provider_names().as_slice(),
+        "bifrost-ffi vendored (maximhq/bifrost/core v1.2.30)"
+    );
 }
 
 fn init_tracing() {

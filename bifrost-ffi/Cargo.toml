@@ -1,0 +1,25 @@
+[package]
+name = "argis-bifrost-ffi"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "FFI bindings to a vendored slice of maximhq/bifrost (Go C-archive). Same wrap pattern as the tokn FFI in OmniRoute PR #305."
+license = "MIT"
+
+[lib]
+name = "argis_bifrost_ffi"
+path = "src/lib.rs"
+
+[build-dependencies]
+# No deps — build.rs shells out to `go build`.
+
+[features]
+default = []
+vendored = []  # Use the vendored go/ source (default). No-op for now; future slices may add a non-vendored fallback.
+
+# Linker instructions. The Go-built static archive is at go/libbifrost_shim.a.
+# Cargo runs the build script which (1) ensures the .a exists (re-runs go build
+# if missing) and (2) tells rustc where to find it.
+[package.metadata.bifrost]
+go-package = "./go"
+lib-name = "bifrost_shim"
