@@ -30,6 +30,11 @@ pub fn take_otel_layer() -> Option<Box<dyn std::any::Any + Send + Sync>> {
     None
 }
 
+/// Atomic flag set when OTel is initialised. Used by take_otel_layer
+/// to decide whether to construct a layer.
+static OTEL_INITIALISED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 /// Global tracer provider. Initialized lazily on first init_otlp() call.
 static TRACER_PROVIDER: OnceLock<SdkTracerProvider> = OnceLock::new();
 
@@ -56,6 +61,7 @@ pub fn init_otlp(service_name: &str, endpoint: &str) -> Result<(), String> {
     let tracer = provider.tracer("argis-monitor");
     opentelemetry::global::set_tracer_provider(provider.clone());
     TRACER_PROVIDER.set(provider).map_err(|_| "already set".to_string())?;
+    OTEL_INITIALISED.store(true, std::sync::atomic::Ordering::Release);
     tracing::info!(service = service_name, endpoint, "OTLP exporter initialised");
     Ok(())
 }

@@ -286,6 +286,14 @@ impl Monitor {
 
     /// Evaluate every alert rule against the latest burn rates. Returns the
     /// list of payloads that fired (already delivered via webhooks).
+    #[tracing::instrument(
+        skip(self),
+        fields(
+            target = %target_name,
+            burn_short = burn_short,
+            burn_long = burn_long,
+        ),
+    )]
     async fn evaluate_alerts(&self, target_name: &str, burn_short: f64, burn_long: f64, ts: u64) -> Vec<alerts::AlertPayload> {
         let mut fired = Vec::new();
         let mut store = self.inner.state_store.lock().await;

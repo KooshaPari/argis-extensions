@@ -56,7 +56,6 @@ fn main() -> anyhow::Result<()> {
 
 async fn run(cli: Cli) -> anyhow::Result<()> {
     let cfg = load_config(cli.config.as_deref()).ok();
-    init_tracing();
     match cli.command {
         Cmd::Start { target, targets, poll_interval_secs, exporter_addr } => {
             let mut cfg = load_config(cli.config.as_deref())?;
@@ -133,6 +132,7 @@ fn init_tracing() {
         .compact()
         .init();
 }
+
 
 
 /// Apply CLI --target / --targets NAME=URL onto a Config. Only used if the
