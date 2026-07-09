@@ -117,10 +117,12 @@ fn load_config(path: Option<&std::path::Path>) -> anyhow::Result<Config> {
 
 fn bifrost_banner() {
     use argis_bifrost_ffi;
+    let sample = argis_bifrost_ffi::schema_dump();
     tracing::info!(
         version = argis_bifrost_ffi::version(),
         providers = argis_bifrost_ffi::provider_count(),
         names = ?argis_bifrost_ffi::provider_names().as_slice(),
+        sample_account = sample,
         "bifrost-ffi vendored (maximhq/bifrost/core v1.2.30)"
     );
 }

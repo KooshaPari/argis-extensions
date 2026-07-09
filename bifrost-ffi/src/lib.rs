@@ -39,6 +39,10 @@ extern "C" {
     /// (caller must NOT free; stable for the lifetime of the process).
     /// Index must be < bifrost_provider_count().
     fn bifrost_provider_name(index: c_int) -> *const c_char;
+
+    /// Returns a heap-allocated C string with a sample Bifrost Account
+    /// (proves the wrap pattern works against the full upstream package).
+    fn bifrost_schema_dump() -> *const c_char;
 }
 
 /// Cached version string. Computed once on first use; the C side keeps
@@ -137,4 +141,31 @@ mod tests {
         for n in &names {
             assert!(!n.is_empty(), "provider name should be non-empty: {n:?}");
         }
+    }
+
+/// Returns a small text dump of a sample Bifrost Account (proves the
+/// wrap pattern works against the full upstream package, not just
+/// our local hand-rolled shim). The Go side constructs a `schemas.Account`
+/// and returns a one-line summary.
+pub fn schema_dump() -> &'static str {
+    use std::sync::OnceLock;
+    static CACHED: OnceLock<String> = OnceLock::new();
+    CACHED.get_or_init(|| {
+        // SAFETY: see version() above.
+        let ptr = unsafe { bifrost_schema_dump() };
+        if ptr.is_null() {
+            return "<unknown>".to_string();
+        }
+        unsafe { CStr::from_ptr(ptr) }
+            .to_string_lossy()
+            .into_owned()
+    }).as_str()
+}
+    #[test]
+    fn schema_dump_includes_known_account_id() {
+        let d = schema_dump();
+        // The vendored shim hardcodes ID "acc-001".
+        assert!(d.contains("acc-001"), "schema_dump should mention acc-001, got: {d}");
+        // The real upstream package's ProviderOpenAI const is "openai".
+        assert!(d.contains("openai"), "schema_dump should mention openai, got: {d}");
     }
