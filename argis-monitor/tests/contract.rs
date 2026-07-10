@@ -458,3 +458,139 @@ async fn bearer_token_file_missing_logs_no_panic() {
     assert!(!reports[0].success);
     assert!(reports[0].error.is_some());
 }
+
+
+// =====================================================================
+// Slice 18: Bifrost-backed meta-alerts (alert_failures table + MetaAlertRule)
+// =====================================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn meta_alert_fires_when_failures_exceed_consecutive_threshold() {
+    use argis_monitor::state_store::StateStore;
+
+    // Fresh DB so prior tests' failures don't bleed in.
+    let tmp = std::env::temp_dir().join(format!(
+        "argis-slice18-fire-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut store = StateStore::open(&tmp).expect("open store");
+
+    let key = "gateway::chat_burn";
+    let now = 1_700_000_000_u64;
+    // Record 3 failures (threshold default is 3) within the last 60s.
+    for offset in [10_u64, 20, 30] {
+        store
+            .record_alert_failure(key, now - offset, "connection refused")
+            .expect("record failure");
+    }
+    // window=60s, threshold=3 -> should fire.
+    let count = store
+        .count_failures_in_window(key, 60, now)
+        .expect("count");
+    assert_eq!(count, 3, "expected 3 failures in 60s window, got {count}");
+
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn meta_alert_does_not_fire_below_consecutive_threshold() {
+    use argis_monitor::state_store::StateStore;
+
+    let tmp = std::env::temp_dir().join(format!(
+        "argis-slice18-below-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut store = StateStore::open(&tmp).expect("open store");
+
+    let key = "gateway::slow_burn";
+    let now = 1_700_000_100_u64;
+    // Only 2 failures (threshold = 3) - should NOT fire.
+    for offset in [5_u64, 15] {
+        store
+            .record_alert_failure(key, now - offset, "timeout")
+            .expect("record failure");
+    }
+    let count = store
+        .count_failures_in_window(key, 60, now)
+        .expect("count");
+    assert_eq!(count, 2, "expected 2 failures, got {count}");
+    assert!(count < 3, "count must stay below consecutive_failures threshold");
+
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn meta_alert_respects_window_boundary() {
+    use argis_monitor::state_store::StateStore;
+
+    let tmp = std::env::temp_dir().join(format!(
+        "argis-slice18-window-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut store = StateStore::open(&tmp).expect("open store");
+
+    let key = "gateway::flapping";
+    let now = 1_700_000_200_u64;
+    // 4 failures total, but only 2 are within the trailing 30s window.
+    store.record_alert_failure(key, now - 5, "e1").unwrap();   // in
+    store.record_alert_failure(key, now - 10, "e2").unwrap();  // in
+    store.record_alert_failure(key, now - 60, "e3").unwrap();  // out
+    store.record_alert_failure(key, now - 120, "e4").unwrap(); // out
+
+    // Window of 30s: should see exactly 2 failures.
+    let count_in = store.count_failures_in_window(key, 30, now).expect("count 30s");
+    assert_eq!(count_in, 2, "30s window should see 2 failures, got {count_in}");
+
+    // Window of 600s: should see all 4 failures.
+    let count_all = store.count_failures_in_window(key, 600, now).expect("count 600s");
+    assert_eq!(count_all, 4, "600s window should see 4 failures, got {count_all}");
+
+    let _ = std::fs::remove_file(&tmp);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn meta_alert_prune_removes_only_old_failures() {
+    use argis_monitor::state_store::StateStore;
+
+    let tmp = std::env::temp_dir().join(format!(
+        "argis-slice18-prune-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut store = StateStore::open(&tmp).expect("open store");
+
+    let key = "gateway::stale";
+    let now = 1_700_000_300_u64;
+    store.record_alert_failure(key, now - 10, "fresh").unwrap();     // 1s ago
+    store.record_alert_failure(key, now - 3_601, "old1").unwrap();    // just over 1h ago
+    store.record_alert_failure(key, now - 7_200, "old2").unwrap();    // 2h ago
+
+    // Prune everything older than 1h. The predicate is strict less-than:
+    // rows with fired_at_unix == threshold are NOT deleted.
+    let deleted = store.prune_alert_failures(now - 3_600).expect("prune");
+    assert_eq!(deleted, 2, "should have deleted the 2 old rows, got {deleted}");
+
+    // Remaining: just the fresh failure.
+    let remaining = store
+        .count_failures_in_window(key, 7_200, now)
+        .expect("count after prune");
+    assert_eq!(remaining, 1, "expected 1 failure remaining, got {remaining}");
+
+    let _ = std::fs::remove_file(&tmp);
+}
+

@@ -284,6 +284,56 @@ impl Monitor {
         Ok(PollOutcome { sample, burn_short, burn_long, alert_payloads: payloads })
     }
 
+    /// Evaluate every meta-alert rule. Returns the names of the meta-alerts
+    /// that fired in this tick (caller is responsible for any delivery).
+    ///
+    /// A meta-alert fires when the alert_failures table holds at least
+    /// `consecutive_failures` rows for the target (and optional specific
+    /// rule) within the trailing `window` seconds. This is the "Bifrost-
+    /// backed" piece: persistent failure history that survives restarts.
+    #[tracing::instrument(skip(self))]
+    pub async fn evaluate_meta_alerts(&self, ts: u64) -> Vec<String> {
+        let rules = self.inner.config.meta_alerts.clone();
+        if rules.is_empty() { return Vec::new(); }
+        let mut store_guard = self.inner.state_store.lock().await;
+        let store = match store_guard.as_mut() {
+            Some(s) => s,
+            None => {
+                tracing::debug!("meta-alert evaluation skipped: no state store configured");
+                return Vec::new();
+            }
+        };
+        let mut fired = Vec::new();
+        for rule in &rules {
+            // The state_store key is "{target}::{rule_name}" for per-rule
+            // counts. When the meta-alert specifies a `rule`, scope to it.
+            let key = match &rule.rule {
+                Some(r) => format!("{}::{}", rule.target, r),
+                None => format!("{}::*", rule.target),
+            };
+            let count = match store.count_failures_in_window(&key, rule.window.as_secs(), ts) {
+                Ok(n) => n,
+                Err(e) => {
+                    tracing::warn!(meta = %rule.name, error = %e, "alert_failures count failed");
+                    continue;
+                }
+            };
+            if count >= u64::from(rule.consecutive_failures) {
+                tracing::info!(
+                    meta = %rule.name,
+                    target = %rule.target,
+                    count = count,
+                    threshold = rule.consecutive_failures,
+                    window_secs = rule.window.as_secs(),
+                    severity = ?rule.severity,
+                    "meta-alert fired"
+                );
+                fired.push(rule.name.clone());
+            }
+        }
+        fired
+    }
+
     /// Evaluate every alert rule against the latest burn rates. Returns the
     /// list of payloads that fired (already delivered via webhooks).
     async fn evaluate_alerts(&self, target_name: &str, burn_short: f64, burn_long: f64, ts: u64) -> Vec<alerts::AlertPayload> {

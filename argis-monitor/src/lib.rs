@@ -55,7 +55,7 @@ pub mod suppression;
 pub mod target;
 pub mod webhook;
 
-pub use alerts::{AlertPayload, AlertRule, AlertState, AlertStateTracker, Decision, Severity, WebhookTarget};
+pub use alerts::{AlertPayload, AlertRule, AlertState, AlertStateTracker, Decision, MetaAlertRule, Severity, WebhookTarget};
 pub use dashboard::{load_and_summarize, DashboardSummary};
 pub use push::{push_to, run_pusher, PushError};
 pub use state_store::{AlertHistoryRow, StateStore, TrackerSnapshot, StateStoreError};

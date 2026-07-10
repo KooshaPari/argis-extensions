@@ -96,6 +96,61 @@ impl Default for AlertRule {
     }
 }
 
+/// A meta-alert rule: fires when `consecutive_failures` webhook delivery
+/// failures occur within `window` seconds for a given (target, rule) pair.
+///
+/// Meta-alerts are a separate layer above per-rule `AlertRule`s: they catch
+/// *patterns of failure* (e.g. webhook target down for 5+ minutes) even when
+/// no burn-rate threshold has crossed. The alert_failures table in the state
+/// store is the source of truth (slice 18).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MetaAlertRule {
+    /// Stable identifier. Used as the meta-alert name + payload.rule.
+    pub name: String,
+    /// Target name to monitor (matches `Target.name`).
+    pub target: String,
+    /// Optional: only count failures for this specific rule on the target.
+    /// When `None`, every failed webhook for `target` counts.
+    #[serde(default)]
+    pub rule: Option<String>,
+    /// Fire when this many failures occur within `window`. Default: 3.
+    #[serde(default = "default_meta_consecutive")]
+    pub consecutive_failures: u32,
+    /// Sliding window over which failures are counted. Default: 300s.
+    #[serde(default = "default_meta_window", with = "seconds_as_duration")]
+    pub window: Duration,
+    /// Severity emitted when the meta-alert fires. Defaults to Critical
+    /// because the failure pattern itself is the signal.
+    #[serde(default = "default_meta_severity")]
+    pub severity: Severity,
+    /// Optional human-readable reason shown in the alert payload.
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// Webhooks to notify when the meta-alert fires. Falls back to the
+    /// owning `AlertRule`'s webhooks when empty (caller decides).
+    #[serde(default)]
+    pub webhooks: Vec<WebhookTarget>,
+}
+
+fn default_meta_consecutive() -> u32 { 3 }
+fn default_meta_window() -> Duration { Duration::from_secs(300) }
+fn default_meta_severity() -> Severity { Severity::Critical }
+
+impl Default for MetaAlertRule {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            target: String::new(),
+            rule: None,
+            consecutive_failures: default_meta_consecutive(),
+            window: default_meta_window(),
+            severity: default_meta_severity(),
+            reason: None,
+            webhooks: Vec::new(),
+        }
+    }
+}
+
 /// Severity of an alert firing. `Ok` is emitted on resolve.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

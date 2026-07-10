@@ -60,6 +60,11 @@ pub struct Config {
     /// Alert rules evaluated each tick. Empty by default (alerts off).
     #[serde(default)]
     pub alert_rules: Vec<crate::alerts::AlertRule>,
+    /// Meta-alert rules evaluated each tick. Each rule fires when its
+    /// target (and optionally a specific rule) sees `consecutive_failures`
+    /// webhook delivery failures within `window` seconds. Empty by default.
+    #[serde(default)]
+    pub meta_alerts: Vec<crate::alerts::MetaAlertRule>,
     /// Optional bearer token sent on every poll. Use for protected gateways.
     #[serde(default)]
     pub bearer_token: Option<String>,
@@ -112,6 +117,7 @@ impl Default for Config {
             exporter_addr: default_exporter_addr(),
             slos: vec![SLO::default()],
             alert_rules: Vec::new(),
+            meta_alerts: Vec::new(),
             bearer_token: None,
             data_dir: default_data_dir(),
             push_url: None,
