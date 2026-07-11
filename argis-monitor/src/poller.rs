@@ -281,6 +281,18 @@ impl Monitor {
 
         // Evaluate alert rules (separately so the metrics lock is released).
         let payloads = self.evaluate_alerts(&target.name, burn_short, burn_long, ts).await;
+        // Meta-alerts run after alert evaluation so the alert_failures rows
+        // recorded above (for failed webhook deliveries) are visible to the
+        // next read. Result is currently only used for structured logging;
+        // future slice will wire delivery of meta-alert payloads.
+        let meta_fired = self.evaluate_meta_alerts(ts).await;
+        for name in &meta_fired {
+            tracing::info!(
+                target = %target.name,
+                meta_alert = %name,
+                "meta-alert fired during poll"
+            );
+        }
         Ok(PollOutcome { sample, burn_short, burn_long, alert_payloads: payloads })
     }
 
