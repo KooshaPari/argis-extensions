@@ -283,15 +283,34 @@ impl Monitor {
         let payloads = self.evaluate_alerts(&target.name, burn_short, burn_long, ts).await;
         // Meta-alerts run after alert evaluation so the alert_failures rows
         // recorded above (for failed webhook deliveries) are visible to the
-        // next read. Result is currently only used for structured logging;
-        // future slice will wire delivery of meta-alert payloads.
+        // next read. Bumps the Prometheus counter for each fire.
         let meta_fired = self.evaluate_meta_alerts(ts).await;
-        for name in &meta_fired {
-            tracing::info!(
-                target = %target.name,
-                meta_alert = %name,
-                "meta-alert fired during poll"
-            );
+        if !meta_fired.is_empty() {
+            let m = self.inner.metrics.lock().await;
+            for name in &meta_fired {
+                // Severity isn't part of the returned names; we look up the
+                // configured rule to get the severity label. Default to
+                // "critical" since that's the meta-alert default.
+                let severity = self
+                    .inner
+                    .config
+                    .meta_alerts
+                    .iter()
+                    .find(|r| &r.name == name)
+                    .map(|r| match r.severity {
+                        alerts::Severity::Critical => "critical",
+                        alerts::Severity::Warning => "warning",
+                        alerts::Severity::Ok => "ok",
+                    })
+                    .unwrap_or("critical");
+                m.record_meta_alert_fire(name, &target.name, severity);
+                tracing::info!(
+                    target = %target.name,
+                    meta_alert = %name,
+                    severity = severity,
+                    "meta-alert fired during poll"
+                );
+            }
         }
         Ok(PollOutcome { sample, burn_short, burn_long, alert_payloads: payloads })
     }

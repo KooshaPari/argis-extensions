@@ -850,3 +850,94 @@ async fn meta_alert_falls_back_to_alert_rule_webhooks_when_meta_webhooks_empty()
     let _ = std::fs::remove_dir_all(&data_dir);
 }
 
+
+// =====================================================================
+// Slice 22: meta-alert Prometheus counter
+// =====================================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn meta_alert_fires_increment_prometheus_counter() {
+    use argis_monitor::alerts::{MetaAlertRule, Severity, WebhookTarget};
+    use argis_monitor::state_store::StateStore;
+
+    let data_dir = std::env::temp_dir().join(format!(
+        "argis-slice22-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&data_dir).unwrap();
+    let db_path = data_dir.join("alert_state.sqlite");
+    {
+        let mut store = StateStore::open(&db_path).expect("open store");
+        // Use the current real time so the failures fall inside any
+        // reasonable meta-alert window when the poll runs.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        for offset in [5_u64, 15, 25] {
+            store.record_alert_failure("gateway::chat_burn", now - offset, "500").expect("record");
+        }
+    }
+
+    let meta_rule = MetaAlertRule {
+        name: "chat_burn_outage".into(),
+        target: "gateway".into(),
+        rule: Some("chat_burn".into()),
+        consecutive_failures: 3,
+        window: std::time::Duration::from_secs(60),
+        severity: Severity::Critical,
+        reason: Some("webhook delivery down".into()),
+        webhooks: vec![WebhookTarget {
+            url: "http://127.0.0.1:1/sink".into(),
+            ..Default::default()
+        }],
+    };
+    let mut cfg = Config::for_test("http://127.0.0.1:1");
+    cfg.data_dir = Some(data_dir.clone());
+    cfg.targets.clear();
+    cfg.targets.push(argis_monitor::Target::new("gateway", "http://127.0.0.1:1"));
+    cfg.meta_alerts.push(meta_rule);
+
+    let monitor = argis_monitor::Monitor::new(cfg).expect("monitor");
+
+    // Drive a poll. poll_once_target fires the meta-alert AND bumps the
+    // Prometheus counter.
+    let _ = monitor
+        .poll_once_target(
+            &argis_monitor::Target::new("gateway", "http://127.0.0.1:1"),
+            std::time::Duration::from_millis(100),
+        )
+        .await;
+
+    // Scrape /metrics via the axum exporter.
+    let mut buf = String::new();
+    prometheus_client::encoding::text::encode(&mut buf, &monitor.registry()).unwrap();
+    assert!(
+        buf.contains("argis_monitor_meta_alerts_fired_total"),
+        "expected meta_alerts_fired_total in metrics:
+{buf}"
+    );
+    // Should be at least 1 with the labels we configured.
+    assert!(
+        buf.contains("meta=\"chat_burn_outage\""),
+        "expected meta=\"chat_burn_outage\" label, got:
+{buf}"
+    );
+    assert!(
+        buf.contains("target=\"gateway\""),
+        "expected target=\"gateway\" label, got:
+{buf}"
+    );
+    assert!(
+        buf.contains("severity=\"critical\""),
+        "expected severity=\"critical\" label, got:
+{buf}"
+    );
+
+    let _ = std::fs::remove_dir_all(&data_dir);
+}
+

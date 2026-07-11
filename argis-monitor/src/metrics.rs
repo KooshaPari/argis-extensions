@@ -54,6 +54,13 @@ pub struct SloOnlyLabels {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct MetaAlertLabels {
+    pub meta: String,
+    pub target: String,
+    pub severity: String,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct InfoLabels {
     pub target: String,
     pub version: String,
@@ -90,6 +97,7 @@ pub struct Metrics {
     pub burn_rate: Family<SloLabels, Gauge>,
     pub slo_target: Family<SloOnlyLabels, Gauge>,
     pub target_info: Family<InfoLabels, Counter>,
+    pub meta_alerts_fired_total: Family<MetaAlertLabels, Counter>,
 }
 
 impl Metrics {
@@ -108,6 +116,7 @@ impl Metrics {
         let burn_rate = Family::<SloLabels, Gauge>::default();
         let slo_target = Family::<SloOnlyLabels, Gauge>::default();
         let target_info = Family::<InfoLabels, Counter>::default();
+        let meta_alerts_fired_total = Family::<MetaAlertLabels, Counter>::default();
 
         registry.register("argis_monitor_polls_total", "Total polls attempted.", polls_total.clone());
         registry.register("argis_monitor_poll_errors_total", "Total polls that failed.", poll_errors_total.clone());
@@ -125,12 +134,17 @@ impl Metrics {
             slo_target.clone(),
         );
         registry.register("argis_monitor_target_info", "Static info about the target gateway.", target_info.clone());
+        registry.register(
+            "argis_monitor_meta_alerts_fired_total",
+            "Total meta-alerts fired, partitioned by meta-alert name, target, and severity.",
+            meta_alerts_fired_total.clone(),
+        );
 
         target_info
             .get_or_create(&InfoLabels { target: target.into(), version: env!("CARGO_PKG_VERSION").into() })
             .inc();
 
-        Self { polls_total, poll_errors_total, poll_duration, last_poll_ts, up, burn_rate, slo_target, target_info }
+        Self { polls_total, poll_errors_total, poll_duration, last_poll_ts, up, burn_rate, slo_target, target_info, meta_alerts_fired_total }
     }
 
     pub fn record_sample(&self, s: &Sample) {
@@ -171,6 +185,19 @@ impl Metrics {
     pub fn record_slo_target(&self, slo: &str, target: f64) {
         let scaled = (target * 1_000.0).round() as i64;
         self.slo_target.get_or_create(&SloOnlyLabels { slo: slo.into() }).set(scaled);
+    }
+
+    /// Increment the meta-alert fired counter for a (meta-alert name,
+    /// target, severity) tuple. Called by the poller after each successful
+    /// meta-alert delivery.
+    pub fn record_meta_alert_fire(&self, meta: &str, target: &str, severity: &str) {
+        self.meta_alerts_fired_total
+            .get_or_create(&MetaAlertLabels {
+                meta: meta.into(),
+                target: target.into(),
+                severity: severity.into(),
+            })
+            .inc();
     }
 }
 
