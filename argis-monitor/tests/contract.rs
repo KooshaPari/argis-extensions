@@ -594,3 +594,101 @@ async fn meta_alert_prune_removes_only_old_failures() {
     let _ = std::fs::remove_file(&tmp);
 }
 
+
+// =====================================================================
+// Slice 19: meta-alert end-to-end wiring (webhook failure -> meta-alert fire)
+// =====================================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn webhook_failures_populate_alert_failures_table_and_meta_alert_fires() {
+    use argis_monitor::alerts::{MetaAlertRule, Severity};
+    use argis_monitor::state_store::StateStore;
+
+    // Fresh DB so prior tests' failures don't bleed in.
+    let data_dir = std::env::temp_dir().join(format!(
+        "argis-slice19-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&data_dir).unwrap();
+    let db_path = data_dir.join("alert_state.sqlite");
+    let mut store = StateStore::open(&db_path).expect("open store");
+
+    // Simulate 3 webhook delivery failures for "gateway::chat_burn" over
+    // the trailing 30s window. The exact same write happens inside the
+    // poller whenever `webhook::deliver_all` returns an unsuccessful report.
+    let key = "gateway::chat_burn";
+    let now: u64 = 1_700_002_000;
+    for offset in [5_u64, 15, 25] {
+        store
+            .record_alert_failure(key, now - offset, "500 Internal Server Error")
+            .expect("record failure");
+    }
+
+    // Sanity: 3 rows recorded.
+    let count = store
+        .count_failures_in_window(key, 60, now)
+        .expect("count");
+    assert_eq!(count, 3, "expected 3 failures in 60s, got {count}");
+
+    // Build a Monitor with a meta-alert that watches "gateway" + rule
+    // "chat_burn" with consecutive=3 and a 60s window. The state store on
+    // disk is the same one we just wrote to.
+    let meta_rule = MetaAlertRule {
+        name: "chat_burn_outage".into(),
+        target: "gateway".into(),
+        rule: Some("chat_burn".into()),
+        consecutive_failures: 3,
+        window: std::time::Duration::from_secs(60),
+        severity: Severity::Critical,
+        reason: Some("webhook delivery down".into()),
+        webhooks: vec![],
+    };
+    let mut cfg = Config::for_test("http://127.0.0.1:1");
+    cfg.data_dir = Some(data_dir.clone());
+    cfg.targets.clear();
+    cfg.targets.push(argis_monitor::Target::new("gateway", "http://127.0.0.1:1"));
+    cfg.meta_alerts.push(meta_rule);
+
+    let monitor = argis_monitor::Monitor::new(cfg).expect("monitor");
+    let fired = monitor.evaluate_meta_alerts(now).await;
+    assert!(
+        fired.contains(&"chat_burn_outage".to_string()),
+        "expected meta-alert to fire after 3 failures in window, got: {fired:?}"
+    );
+
+    // Below threshold: pruning one row should bring count to 2 and the
+    // meta-alert should NOT fire on the next evaluation.
+    store
+        .prune_alert_failures(now - 24)
+        .expect("prune");
+    let monitor2 = argis_monitor::Monitor::new({
+        let mut c = Config::for_test("http://127.0.0.1:1");
+        c.data_dir = Some(data_dir.clone());
+        c.targets.clear();
+        c.targets.push(argis_monitor::Target::new("gateway", "http://127.0.0.1:1"));
+        c.meta_alerts.push(MetaAlertRule {
+            name: "chat_burn_outage".into(),
+            target: "gateway".into(),
+            rule: Some("chat_burn".into()),
+            consecutive_failures: 3,
+            window: std::time::Duration::from_secs(60),
+            severity: Severity::Critical,
+            reason: Some("webhook delivery down".into()),
+            webhooks: vec![],
+        });
+        c
+    })
+    .expect("monitor2");
+    let fired_after = monitor2.evaluate_meta_alerts(now).await;
+    assert!(
+        fired_after.is_empty(),
+        "expected no meta-alerts after pruning below threshold, got: {fired_after:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(&data_dir);
+}
+

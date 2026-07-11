@@ -373,6 +373,22 @@ impl Monitor {
                             let reports = webhook::deliver_all(&self.inner.http, &rule.webhooks, &payload).await;
                             let mut last = self.inner.last_delivery.lock().await;
                             for r in reports {
+                                if !r.success {
+                                    // Seed the meta-alert pipeline. The key
+                                    // is "{target}::{rule.name}" so the meta-
+                                    // alert layer can scope by rule when it
+                                    // wants to (or use a "{target}::*" key
+                                    // for the unscoped variant). We rely on
+                                    // the persisted row rather than an in-
+                                    // memory counter so failures survive a
+                                    // monitor restart.
+                                    if let Some(s) = store.as_mut() {
+                                        let msg = r.error.as_deref().unwrap_or("webhook delivery failed");
+                                        if let Err(e) = s.record_alert_failure(&key, ts, msg) {
+                                            tracing::warn!(target = %target_name, rule = %rule.name, error = %e, "alert failure record failed");
+                                        }
+                                    }
+                                }
                                 last.insert(r.url.clone(), r);
                             }
                         }
