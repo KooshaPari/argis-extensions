@@ -210,6 +210,41 @@ impl AlertPayload {
             message: format!("argis-monitor: RESOLVED target={target} slo={slo} burn={burn:.2}x <= {resolve_threshold:.2}x"),
         }
     }
+
+    /// Build a payload for a meta-alert fire. The meta-alert name goes in
+    /// `rule`, the target in `target`, the optional reason in `slo` (which
+    /// is just a free-form string in the JSON envelope), the observed
+    /// failure count in `burn_rate`, the configured threshold in
+    /// `threshold`, and the meta-rule's severity in `severity`.
+    pub fn meta_alert(
+        name: String,
+        target: String,
+        reason: Option<String>,
+        count: f64,
+        threshold: f64,
+        severity: Severity,
+        ts: u64,
+    ) -> Self {
+        let reason_str = reason.as_deref().unwrap_or("");
+        Self {
+            rule: name.clone(),
+            target,
+            slo: reason_str.to_string(),
+            burn_rate: count,
+            threshold,
+            severity,
+            fired_at_unix: ts,
+            message: format!(
+                "argis-monitor: META-ALERT {name} target-count={count:.0} threshold={threshold:.0}{} ({})",
+                if reason_str.is_empty() { String::new() } else { format!(" reason={reason_str}") },
+                match severity {
+                    Severity::Critical => "CRITICAL",
+                    Severity::Warning  => "WARNING",
+                    Severity::Ok       => "ok",
+                }
+            ),
+        }
+    }
 }
 
 /// State machine for one (rule, target, slo) combination.

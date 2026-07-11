@@ -692,3 +692,161 @@ async fn webhook_failures_populate_alert_failures_table_and_meta_alert_fires() {
     let _ = std::fs::remove_dir_all(&data_dir);
 }
 
+
+// =====================================================================
+// Slice 21: meta-alert payload delivery (webhook::deliver_all path)
+// =====================================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn meta_alert_payload_delivered_to_webhook_via_meta_alerts_route() {
+    use argis_monitor::alerts::{MetaAlertRule, Severity, WebhookTarget};
+    use argis_monitor::state_store::StateStore;
+    use wiremock::matchers::{method, path};
+
+    // Webhook receiver that expects a POST to /meta. expect(1) makes
+    // wiremock fail the test if the delivery never lands.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/meta"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    // Fresh data dir so we can pre-seed alert_failures + re-open the same
+    // store inside the Monitor.
+    let data_dir = std::env::temp_dir().join(format!(
+        "argis-slice21-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&data_dir).unwrap();
+    let db_path = data_dir.join("alert_state.sqlite");
+    {
+        let mut store = StateStore::open(&db_path).expect("open store");
+        let now: u64 = 1_700_003_000;
+        // 3 failures -> fires the meta-alert (threshold = 3).
+        for offset in [5_u64, 15, 25] {
+            store
+                .record_alert_failure("gateway::chat_burn", now - offset, "500")
+                .expect("record");
+        }
+    }
+
+    // Build a Monitor whose meta-rule points at the wiremock webhook.
+    let meta_rule = MetaAlertRule {
+        name: "chat_burn_outage".into(),
+        target: "gateway".into(),
+        rule: Some("chat_burn".into()),
+        consecutive_failures: 3,
+        window: std::time::Duration::from_secs(60),
+        severity: Severity::Critical,
+        reason: Some("webhook delivery down".into()),
+        webhooks: vec![WebhookTarget {
+            url: format!("{}/meta", server.uri()),
+            ..Default::default()
+        }],
+    };
+    let mut cfg = Config::for_test("http://127.0.0.1:1");
+    cfg.data_dir = Some(data_dir.clone());
+    cfg.targets.clear();
+    cfg.targets.push(argis_monitor::Target::new("gateway", "http://127.0.0.1:1"));
+    cfg.meta_alerts.push(meta_rule);
+
+    let monitor = argis_monitor::Monitor::new(cfg).expect("monitor");
+    let now: u64 = 1_700_003_000;
+    let fired = monitor.evaluate_meta_alerts(now).await;
+    assert!(
+        fired.contains(&"chat_burn_outage".to_string()),
+        "expected meta-alert to fire, got: {fired:?}"
+    );
+
+    // wiremock asserts the body arrived; give it a moment to drain.
+    server.verify().await;
+
+    let _ = std::fs::remove_dir_all(&data_dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn meta_alert_falls_back_to_alert_rule_webhooks_when_meta_webhooks_empty() {
+    use argis_monitor::alerts::{AlertRule, MetaAlertRule, Severity, WebhookTarget};
+    use argis_monitor::state_store::StateStore;
+    use wiremock::matchers::{method, path};
+
+    // Wiremock that the AlertRule points at AND the meta-rule should fall
+    // back to (since the meta-rule has no webhooks of its own).
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/fallback"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let data_dir = std::env::temp_dir().join(format!(
+        "argis-slice21-fb-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&data_dir).unwrap();
+    let db_path = data_dir.join("alert_state.sqlite");
+    {
+        let mut store = StateStore::open(&db_path).expect("open store");
+        let now: u64 = 1_700_004_000;
+        for offset in [5_u64, 15, 25] {
+            store
+                .record_alert_failure("gateway::chat_burn", now - offset, "500")
+                .expect("record");
+        }
+    }
+
+    // Meta-rule with NO webhooks. The Monitor must fall back to the
+    // matching AlertRule's webhooks.
+    let meta_rule = MetaAlertRule {
+        name: "chat_burn_outage".into(),
+        target: "gateway".into(),
+        rule: Some("chat_burn".into()),
+        consecutive_failures: 3,
+        window: std::time::Duration::from_secs(60),
+        severity: Severity::Critical,
+        reason: Some("webhook delivery down".into()),
+        webhooks: vec![], // <- empty, must fall back
+    };
+    let alert_rule = AlertRule {
+        name: "chat_burn".into(),
+        slo: "chat_completions_p99".into(),
+        threshold: 0.1,
+        resolve_threshold: None,
+        window: None,
+        for_secs: std::time::Duration::from_secs(0),
+        cooldown: std::time::Duration::from_secs(0),
+        webhooks: vec![WebhookTarget {
+            url: format!("{}/fallback", server.uri()),
+            ..Default::default()
+        }],
+    };
+    let mut cfg = Config::for_test("http://127.0.0.1:1");
+    cfg.data_dir = Some(data_dir.clone());
+    cfg.targets.clear();
+    cfg.targets.push(argis_monitor::Target::new("gateway", "http://127.0.0.1:1"));
+    cfg.alert_rules.push(alert_rule);
+    cfg.meta_alerts.push(meta_rule);
+
+    let monitor = argis_monitor::Monitor::new(cfg).expect("monitor");
+    let now: u64 = 1_700_004_000;
+    let fired = monitor.evaluate_meta_alerts(now).await;
+    assert!(
+        fired.contains(&"chat_burn_outage".to_string()),
+        "expected meta-alert to fire, got: {fired:?}"
+    );
+
+    server.verify().await;
+    let _ = std::fs::remove_dir_all(&data_dir);
+}
+

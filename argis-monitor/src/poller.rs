@@ -296,13 +296,19 @@ impl Monitor {
         Ok(PollOutcome { sample, burn_short, burn_long, alert_payloads: payloads })
     }
 
-    /// Evaluate every meta-alert rule. Returns the names of the meta-alerts
-    /// that fired in this tick (caller is responsible for any delivery).
+    /// Evaluate every meta-alert rule and deliver the resulting payloads.
+    /// Returns the names of the meta-alerts that fired in this tick.
     ///
     /// A meta-alert fires when the alert_failures table holds at least
     /// `consecutive_failures` rows for the target (and optional specific
     /// rule) within the trailing `window` seconds. This is the "Bifrost-
     /// backed" piece: persistent failure history that survives restarts.
+    ///
+    /// Delivery: each fired meta-alert is wrapped in an `AlertPayload` and
+    /// POSTed via `webhook::deliver_all`. Webhook targets are taken from
+    /// `MetaAlertRule.webhooks` when non-empty; otherwise the matching
+    /// `AlertRule.webhooks` for the same target is used as the fallback so
+    /// operators don't have to configure meta-alert webhooks twice.
     #[tracing::instrument(skip(self))]
     pub async fn evaluate_meta_alerts(&self, ts: u64) -> Vec<String> {
         let rules = self.inner.config.meta_alerts.clone();
@@ -340,6 +346,53 @@ impl Monitor {
                     severity = ?rule.severity,
                     "meta-alert fired"
                 );
+
+                // Build the payload. The AlertPayload struct already carries
+                // the right fields for a meta-alert: we put the meta-alert
+                // name in `rule`, the target in `target`, the optional
+                // reason in `slo` (it's just a free-form string), and the
+                // observed count + threshold into the burn_rate/threshold
+                // numeric slots so downstream consumers see real numbers.
+                let payload = alerts::AlertPayload::meta_alert(
+                    rule.name.clone(),
+                    rule.target.clone(),
+                    rule.reason.clone(),
+                    count as f64,
+                    rule.consecutive_failures as f64,
+                    rule.severity,
+                    ts,
+                );
+
+                // Resolve webhooks: prefer meta-rule's own, fall back to a
+                // matching AlertRule's webhooks for the same target.
+                let webhook_targets: Vec<alerts::WebhookTarget> = if !rule.webhooks.is_empty() {
+                    rule.webhooks.clone()
+                } else {
+                    self.inner.config.alert_rules.iter()
+                        .find(|ar| {
+                            ar.name == rule.rule.clone().unwrap_or_default()
+                                && self.inner.config.targets.iter().any(|t| t.name == ar.slo || t.name == rule.target)
+                        })
+                        .map(|ar| ar.webhooks.clone())
+                        .unwrap_or_default()
+                };
+
+                if webhook_targets.is_empty() {
+                    tracing::warn!(
+                        meta = %rule.name,
+                        target = %rule.target,
+                        "meta-alert fired but no webhook targets configured"
+                    );
+                } else {
+                    let reports = webhook::deliver_all(
+                        &self.inner.http, &webhook_targets, &payload,
+                    ).await;
+                    let mut last = self.inner.last_delivery.lock().await;
+                    for r in reports {
+                        last.insert(r.url.clone(), r);
+                    }
+                }
+
                 fired.push(rule.name.clone());
             }
         }
