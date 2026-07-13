@@ -173,9 +173,6 @@ impl Monitor {
             "argis-monitor starting"
         );
 
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-        let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
-
         // Spawn one task per target.
         let mut handles = Vec::with_capacity(cfg.targets.len());
         for target in cfg.targets.clone() {
@@ -189,9 +186,19 @@ impl Monitor {
         }
 
         // Block on signals.
-        tokio::select! {
-            _ = sigterm.recv() => { info!("SIGTERM, exiting"); }
-            _ = sigint.recv()  => { info!("SIGINT, exiting");  }
+        #[cfg(unix)]
+        {
+            let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+            let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+            tokio::select! {
+                _ = sigterm.recv() => { info!("SIGTERM, exiting"); }
+                _ = sigint.recv()  => { info!("SIGINT, exiting");  }
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            tokio::signal::ctrl_c().await?;
+            info!("CTRL-C, exiting");
         }
         for h in handles { let _ = h.await; }
         Ok(())

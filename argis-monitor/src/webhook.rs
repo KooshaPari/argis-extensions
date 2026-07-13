@@ -11,10 +11,6 @@
 
 use std::time::Duration;
 
-fn headers_mut_insert(h: &mut reqwest::header::HeaderMap, name: reqwest::header::HeaderName, val: reqwest::header::HeaderValue) {
-    h.insert(name, val);
-}
-
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{error, info, warn};
@@ -56,6 +52,7 @@ pub async fn deliver_all(
 async fn deliver_one(http: &reqwest::Client, target: &WebhookTarget, payload: &AlertPayload) -> DeliveryReport {
     let mut last_err = None;
     let mut last_status = None;
+    let is_aws_target = target.aws_region.is_some() && target.aws_service.is_some();
     for attempt in 0..2u8 {
         let body = match serde_json::to_vec(payload) {
             Ok(b) => b,
@@ -73,6 +70,12 @@ async fn deliver_one(http: &reqwest::Client, target: &WebhookTarget, payload: &A
             let headers = req.headers_mut();
             for (k, v) in &target.headers {
                 if let Ok(name) = reqwest::header::HeaderName::from_bytes(k.as_bytes()) {
+                    if is_aws_target
+                        && (name == reqwest::header::CONTENT_TYPE || name == reqwest::header::HOST)
+                    {
+                        warn!(header = %name, url = %target.url, "ignoring AWS target header that is fixed by SigV4 signing");
+                        continue;
+                    }
                     if let Ok(val) = reqwest::header::HeaderValue::from_str(v) {
                         headers.insert(name, val);
                     }
@@ -80,7 +83,7 @@ async fn deliver_one(http: &reqwest::Client, target: &WebhookTarget, payload: &A
             }
         }
         // SigV4 signing (if AWS config present).
-        if target.aws_region.is_some() && target.aws_service.is_some() {
+        if is_aws_target {
             let creds = crate::aws_sigv4::AwsCreds {
                 access_key: target.aws_access_key_id.clone()
                     .or_else(|| std::env::var("AWS_ACCESS_KEY_ID").ok())
@@ -104,7 +107,7 @@ async fn deliver_one(http: &reqwest::Client, target: &WebhookTarget, payload: &A
                     for (k, v) in sig {
                         if let Ok(name) = reqwest::header::HeaderName::from_bytes(k.as_bytes()) {
                             if let Ok(val) = reqwest::header::HeaderValue::from_str(&v) {
-                                headers_mut_insert(h, name, val);
+                                h.insert(name, val);
                             }
                         }
                     }
@@ -124,6 +127,11 @@ async fn deliver_one(http: &reqwest::Client, target: &WebhookTarget, payload: &A
                     return DeliveryReport { url: target.url.clone(), success: true, status: Some(s), error: None };
                 } else {
                     last_err = Some(format!("http {s}"));
+                    // A signed POST may have reached AWS even when its response is an
+                    // error, so retrying it could duplicate the alert delivery.
+                    if is_aws_target {
+                        break;
+                    }
                 }
             }
             Err(e) => { last_err = Some(e.to_string()); }

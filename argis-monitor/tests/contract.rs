@@ -9,7 +9,23 @@ use argis_monitor::exporter;
 use argis_monitor::{Config, Monitor, Outcome, SLO};
 use prometheus_client::encoding::text::encode;
 use wiremock::matchers::{method, path};
-use wiremock::{Mock, MockServer, ResponseTemplate};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+struct FirstOkThenUnavailable {
+    calls: AtomicUsize,
+}
+
+impl Respond for FirstOkThenUnavailable {
+    fn respond(&self, _: &Request) -> ResponseTemplate {
+        if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            ResponseTemplate::new(200)
+        } else {
+            ResponseTemplate::new(503)
+        }
+    }
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn healthy_target_polls_and_emits_metrics() {
@@ -99,12 +115,9 @@ async fn exporter_serves_metrics_text_format() {
 async fn multi_window_burn_reflects_error_traffic() {
     let server = MockServer::start().await;
     // First poll: ok. Subsequent polls: 503.
-    let _m1 = Mock::given(method("GET")).and(path("/health"))
-        .respond_with(ResponseTemplate::new(200))
-        .expect(1..)
-        .mount(&server);
     Mock::given(method("GET")).and(path("/health"))
-        .respond_with(ResponseTemplate::new(503))
+        .respond_with(FirstOkThenUnavailable { calls: AtomicUsize::new(0) })
+        .expect(3)
         .mount(&server)
         .await;
 
@@ -236,7 +249,11 @@ async fn webhook_posts_payload_as_json() {
     let target = argis_monitor::alerts::WebhookTarget {
         url: format!("{}/alerts", server.uri()),
         headers: Default::default(),
-        ..Default::default()
+        aws_region: None,
+        aws_service: None,
+        aws_access_key_id: None,
+        aws_secret_access_key: None,
+        aws_session_token: None,
     };
     let payload = argis_monitor::alerts::AlertPayload::firing("r", "gateway", "s", 5.0, 2.0, 12345);
     let reports = argis_monitor::deliver_all(&client, &[target], &payload).await;
@@ -259,7 +276,11 @@ async fn webhook_records_failure_on_5xx() {
     let target = argis_monitor::alerts::WebhookTarget {
         url: format!("{}/alerts", server.uri()),
         headers: Default::default(),
-        ..Default::default()
+        aws_region: None,
+        aws_service: None,
+        aws_access_key_id: None,
+        aws_secret_access_key: None,
+        aws_session_token: None,
     };
     let payload = argis_monitor::alerts::AlertPayload::firing("r", "gateway", "s", 5.0, 2.0, 12345);
     let reports = argis_monitor::deliver_all(&client, &[target], &payload).await;

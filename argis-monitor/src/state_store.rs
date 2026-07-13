@@ -84,8 +84,13 @@ impl StateStore {
             let since_unix: u64 = row.get(2)?;
             let last_fired_unix: u64 = row.get(3)?;
             let sustained_secs: u64 = row.get(4)?;
-            let state = parse_state(&state_str, since_unix, last_fired_unix)
-                .map_err(|e| rusqlite::Error::InvalidQuery)?;
+            let state = parse_state(&state_str, since_unix, last_fired_unix).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    1,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?;
             Ok((key, TrackerSnapshot { state, sustained_secs }))
         })?;
         let mut out = Vec::new();
@@ -211,18 +216,11 @@ pub struct AlertHistoryRow {
     pub fired_at_unix: u64,
 }
 
-/// Wrapper that surfaces corrupt rows as `StateStoreError::InvalidState`.
-/// Kept separate from the closure-internal `parse_state` (which has to return
-/// `rusqlite::Error` because it runs inside `query_map`'s closure).
 pub fn parse_state_err(s: &str, since: u64, last_fired: u64) -> Result<AlertState, StateStoreError> {
-    match s {
-        "ok" => Ok(AlertState::Ok),
-        "pending" => Ok(AlertState::Pending { since }),
-        "firing" => Ok(AlertState::Firing { since, last_fired_at: last_fired }),
-        other => Err(StateStoreError::InvalidState(other.to_string())),
-    }
+    parse_state(s, since, last_fired)
 }
 
+/// Parse a persisted alert-state discriminator.
 fn parse_state(s: &str, since: u64, last_fired: u64) -> Result<AlertState, StateStoreError> {
     match s {
         "ok" => Ok(AlertState::Ok),
@@ -345,6 +343,20 @@ mod tests {
         assert_eq!(firing, AlertState::Firing { since: 200, last_fired_at: 250 });
         let err = parse_state_err("wat", 0, 0).unwrap_err();
         assert!(matches!(err, StateStoreError::InvalidState(s) if s == "wat"));
+    }
+
+    #[test]
+    fn load_all_preserves_corrupt_state_context() {
+        let path = tmpfile("corrupt-state");
+        let store = StateStore::open(&path).unwrap();
+        store.conn.execute(
+            "INSERT INTO alert_state (key, state, since_unix, last_fired_unix, sustained_secs)
+             VALUES ('gw::broken', 'wat', 0, 0, 0)",
+            [],
+        ).unwrap();
+
+        let err = store.load_all().unwrap_err();
+        assert!(err.to_string().contains("wat"), "missing corrupt state context: {err}");
     }
 
     #[test]
