@@ -1044,3 +1044,118 @@ data_dir: null
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+
+// =====================================================================
+// Slice 25: hot-reload meta_alerts via SIGHUP (implicit in slice 24, verified here)
+// =====================================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn hot_reload_swaps_meta_alerts_atomically() {
+    use argis_monitor::alerts::{MetaAlertRule, Severity, WebhookTarget};
+    use argis_monitor::state_store::StateStore;
+    let dir = std::env::temp_dir().join(format!(
+        "argis-slice25-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db_path = dir.join("alert_state.sqlite");
+    let yaml_path = dir.join("config.yaml");
+
+    // v1: empty meta_alerts, low threshold (3) on one target.
+    let yaml_v1 = r#"
+targets:
+  - name: gateway
+    url: http://127.0.0.1:1
+    poll_interval: 15s
+exporter_addr: "0.0.0.0:9090"
+alert_rules: []
+meta_alerts:
+  - name: webhook_failure_v1
+    target: gateway
+    rule: null
+    consecutive_failures: 3
+    window: 60s
+    severity: critical
+    reason: null
+    webhooks: []
+data_dir: ~
+"#;
+    // Patch the actual db_path into v1 (data_dir is templated above).
+    let yaml_v1 = yaml_v1.replace("data_dir: ~", &format!("data_dir: {}", dir.display()));
+    std::fs::write(&yaml_path, &yaml_v1).unwrap();
+
+    let cfg_v1: argis_monitor::Config = serde_yaml::from_str(&yaml_v1).unwrap();
+    let monitor = argis_monitor::Monitor::new(cfg_v1).expect("monitor v1");
+    assert_eq!(monitor.config().meta_alerts.len(), 1);
+    assert_eq!(monitor.config().meta_alerts[0].name, "webhook_failure_v1");
+    assert_eq!(monitor.config().meta_alerts[0].consecutive_failures, 3);
+
+    // Seed 3 alert_failures for "gateway::*" — the v1 meta-alert would fire.
+    {
+        let mut store = StateStore::open(&db_path).expect("open store");
+        let now: u64 = 1_700_010_000;
+        for offset in [5_u64, 15, 25] {
+            store.record_alert_failure("gateway::*", now - offset, "500").expect("record");
+        }
+    }
+    let fired_v1 = monitor.evaluate_meta_alerts(1_700_010_000).await;
+    assert!(fired_v1.contains(&"webhook_failure_v1".to_string()),
+        "v1 meta-alert should fire before reload, got: {fired_v1:?}");
+
+    // v2: rename meta-alert + raise threshold to 5 so it does NOT fire.
+    let yaml_v2 = r#"
+targets:
+  - name: gateway
+    url: http://127.0.0.1:1
+    poll_interval: 15s
+exporter_addr: "0.0.0.0:9090"
+alert_rules: []
+meta_alerts:
+  - name: webhook_failure_v2
+    target: gateway
+    rule: null
+    consecutive_failures: 5
+    window: 60s
+    severity: warning
+    reason: v2 reason
+    webhooks: []
+data_dir: ~
+"#;
+    let yaml_v2 = yaml_v2.replace("data_dir: ~", &format!("data_dir: {}", dir.display()));
+    std::fs::write(&yaml_path, &yaml_v2).unwrap();
+
+    // Hot-reload. The new meta_alerts must take effect immediately.
+    monitor.reload_from_path(&yaml_path).await.expect("reload v2");
+
+    // Verify the config reflects v2 (name, threshold, severity, reason).
+    let cfg = monitor.config();
+    assert_eq!(cfg.meta_alerts.len(), 1, "should still have 1 meta_alert after swap");
+    assert_eq!(cfg.meta_alerts[0].name, "webhook_failure_v2");
+    assert_eq!(cfg.meta_alerts[0].consecutive_failures, 5);
+    assert_eq!(cfg.meta_alerts[0].severity, Severity::Warning);
+    assert_eq!(cfg.meta_alerts[0].reason.as_deref(), Some("v2 reason"));
+
+    // Re-evaluate: only 3 failures in window, threshold is now 5 -> no fire.
+    let fired_v2 = monitor.evaluate_meta_alerts(1_700_010_000).await;
+    assert!(fired_v2.is_empty(),
+        "v2 threshold (5) should NOT fire on 3 failures, got: {fired_v2:?}");
+
+    // Seed 2 more failures to reach 5; now v2 fires (and v1's name does NOT).
+    {
+        let mut store = StateStore::open(&db_path).expect("open store");
+        let now: u64 = 1_700_010_000;
+        for offset in [3_u64, 8] {
+            store.record_alert_failure("gateway::*", now - offset, "500").expect("record");
+        }
+    }
+    let fired_v2_after = monitor.evaluate_meta_alerts(1_700_010_000).await;
+    assert_eq!(fired_v2_after, vec!["webhook_failure_v2".to_string()],
+        "v2 meta-alert should fire at threshold 5, got: {fired_v2_after:?}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
