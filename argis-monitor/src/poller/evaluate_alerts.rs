@@ -21,9 +21,10 @@ pub(crate) async fn evaluate_alerts_impl(
     burn_long: f64,
     ts: u64,
 ) -> Vec<AlertPayload> {
+    let inner = me.inner.load();
     let mut fired = Vec::new();
-    let mut store = me.inner.state_store.lock().await;
-    for rule in &me.inner.config.alert_rules {
+    let mut store = inner.state_store.lock().await;
+    for rule in &inner.config.alert_rules {
         let burn = match rule.window {
             Some(w) if w >= crate::slo::BurnWindow::SLOW_BURN.long => burn_long,
             _ => burn_short,
@@ -31,7 +32,7 @@ pub(crate) async fn evaluate_alerts_impl(
         let key = format!("{}::{}", target_name, rule.name);
         let snap;
         {
-            let mut trackers = me.inner.alert_trackers.lock().await;
+            let mut trackers = inner.alert_trackers.lock().await;
             let tracker = trackers.entry(key.clone()).or_insert_with(AlertStateTracker::default);
             match alerts::evaluate(rule, target_name, burn, ts, tracker) {
                 Decision::Fire(payload) => {
@@ -40,7 +41,7 @@ pub(crate) async fn evaluate_alerts_impl(
                     // transitions (so the alert would have fired is
                     // visible in metrics + the alert_history table).
                     let window_name = suppression::is_suppressed(
-                        &me.inner.config.alert_windows,
+                        &inner.config.alert_windows,
                         target_name,
                         &rule.name,
                         ts,
@@ -54,8 +55,8 @@ pub(crate) async fn evaluate_alerts_impl(
                             "alert suppressed by window"
                         );
                     } else {
-                        let reports = webhook::deliver_all(&me.inner.http, &rule.webhooks, &payload).await;
-                        let mut last = me.inner.last_delivery.lock().await;
+                        let reports = webhook::deliver_all(&inner.http, &rule.webhooks, &payload).await;
+                        let mut last = inner.last_delivery.lock().await;
                         for r in reports {
                             if !r.success {
                                 // Seed the meta-alert pipeline. The key

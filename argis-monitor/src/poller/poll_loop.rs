@@ -29,11 +29,12 @@ pub(crate) async fn poll_once_target_impl(
     timeout: std::time::Duration,
 ) -> Result<PollOutcome, PollError> {
     let started = Instant::now();
+    let inner = me.inner.load();
     let url = match target.url.find("://") {
         Some(idx) if target.url[idx + 3..].contains('/') => target.url.clone(),
         _ => format!("{}/health", target.url.trim_end_matches('/')),
     };
-    let res = me.inner.http.get(&url).timeout(timeout).send().await;
+    let res = inner.http.get(&url).timeout(timeout).send().await;
     let latency = started.elapsed();
     let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
 
@@ -61,11 +62,11 @@ pub(crate) async fn poll_once_target_impl(
         }
     };
 
-    let mut m = me.inner.metrics.lock().await;
+    let mut m = inner.metrics.lock().await;
     m.record_sample(&sample);
 
     // Update per-target ring buffers + compute burn against each SLO.
-    let mut c = me.inner.counters.lock().await;
+    let mut c = inner.counters.lock().await;
     let tc = c.get_mut(&target.name).ok_or_else(|| {
         PollError::InvalidConfig(format!("target {} not initialised", target.name))
     })?;
@@ -80,7 +81,7 @@ pub(crate) async fn poll_once_target_impl(
 
     let mut burn_short = 0.0_f64;
     let mut burn_long = 0.0_f64;
-    for slo in &me.inner.config.slos {
+    for slo in &inner.config.slos {
         let bs = burn_rate(s_short, f_short, slo.target);
         let bl = burn_rate(s_long, f_long, slo.target);
         m.record_burn(&format!("{}::{}", target.name, slo.name), BurnWindow::FAST_BURN, bs);
@@ -97,13 +98,12 @@ pub(crate) async fn poll_once_target_impl(
     // next read. Bumps the Prometheus counter for each fire.
     let meta_fired = evaluate_meta_alerts_impl(me, ts).await;
     if !meta_fired.is_empty() {
-        let m = me.inner.metrics.lock().await;
+        let m = inner.metrics.lock().await;
         for name in &meta_fired {
             // Severity isn't part of the returned names; we look up the
             // configured rule to get the severity label. Default to
             // "critical" since that's the meta-alert default.
-            let severity = me
-                .inner
+            let severity = inner
                 .config
                 .meta_alerts
                 .iter()

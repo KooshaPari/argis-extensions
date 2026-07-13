@@ -941,3 +941,106 @@ async fn meta_alert_fires_increment_prometheus_counter() {
     let _ = std::fs::remove_dir_all(&data_dir);
 }
 
+
+// =====================================================================
+// Slice 24: hot-reload real swap (ArcSwap<MonitorInner>)
+// =====================================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn reload_from_path_atomically_swaps_monitor_inner() {
+    // Write a YAML config with one target + one rule.
+    let dir = std::env::temp_dir().join(format!(
+        "argis-slice24-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let yaml_path = dir.join("config.yaml");
+
+    let yaml_v1 = r#"
+targets:
+  - name: gateway
+    url: http://127.0.0.1:1
+    poll_interval: 15s
+exporter_addr: "0.0.0.0:9090"
+alert_rules:
+  - name: v1_only_rule
+    slo: chat_completions_p99
+    threshold: 5.0
+    for_secs: 0s
+    cooldown: 60s
+    webhooks: []
+meta_alerts: []
+data_dir: null
+"#;
+    std::fs::write(&yaml_path, yaml_v1).unwrap();
+
+    // Parse the v1 config and build a Monitor without going through the file.
+    let cfg_v1: argis_monitor::Config = serde_yaml::from_str(yaml_v1).unwrap();
+    let monitor = argis_monitor::Monitor::new(cfg_v1).expect("monitor v1");
+
+    // Sanity: v1 has the v1_only_rule and no meta_alerts.
+    assert_eq!(monitor.config().alert_rules.len(), 1);
+    assert_eq!(monitor.config().alert_rules[0].name, "v1_only_rule");
+    assert_eq!(monitor.config().meta_alerts.len(), 0);
+
+    // Rewrite the YAML to a v2 config with a different rule + 1 meta_alert.
+    let yaml_v2 = r#"
+targets:
+  - name: gateway
+    url: http://127.0.0.1:1
+    poll_interval: 30s
+exporter_addr: "0.0.0.0:9091"
+alert_rules:
+  - name: v2_replacement_rule
+    slo: chat_completions_p99
+    threshold: 10.0
+    for_secs: 0s
+    cooldown: 60s
+    webhooks: []
+  - name: v2_extra_rule
+    slo: chat_completions_p99
+    threshold: 20.0
+    for_secs: 0s
+    cooldown: 60s
+    webhooks: []
+meta_alerts:
+  - name: webhook_failure_alert
+    target: gateway
+    rule: null
+    consecutive_failures: 5
+    window: 300s
+    severity: critical
+    reason: null
+    webhooks: []
+data_dir: null
+"#;
+    std::fs::write(&yaml_path, yaml_v2).unwrap();
+
+    // Reload from the (now-updated) file. This must atomically swap the inner.
+    monitor.reload_from_path(&yaml_path).await.expect("reload");
+
+    // After reload: the new config is in effect on every subsequent access.
+    let cfg = monitor.config();
+    assert_eq!(cfg.exporter_addr, "0.0.0.0:9091", "exporter_addr should reflect v2");
+    assert_eq!(cfg.alert_rules.len(), 2, "should now have 2 alert rules");
+    let names: Vec<&str> = cfg.alert_rules.iter().map(|r| r.name.as_str()).collect();
+    assert!(names.contains(&"v2_replacement_rule"));
+    assert!(names.contains(&"v2_extra_rule"));
+    assert!(!names.contains(&"v1_only_rule"), "v1 rule should be gone after swap");
+    assert_eq!(cfg.meta_alerts.len(), 1, "should now have 1 meta_alert");
+    assert_eq!(cfg.meta_alerts[0].name, "webhook_failure_alert");
+
+    // Registry is also swapped (Prometheus exporter exposes the new one).
+    // We can assert that the registry still has the canonical baseline metric
+    // (target_info), proving the swap didn't lose the registry.
+    let mut buf = String::new();
+    prometheus_client::encoding::text::encode(&mut buf, &monitor.registry()).unwrap();
+    assert!(buf.contains("argis_monitor_target_info"), "registry should still expose target_info");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+

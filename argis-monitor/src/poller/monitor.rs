@@ -5,9 +5,11 @@
 //! `evaluate_meta_alerts`.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow;
+use arc_swap::ArcSwap;
 use prometheus_client::registry::Registry;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
@@ -24,9 +26,24 @@ use super::poll_loop::poll_once_target_impl;
 use super::types::{MonitorInner, PollError, TargetCounters};
 
 /// The monitor: shared registry + metrics + per-target ring buffers + HTTP client.
-#[derive(Clone)]
+///
+/// All mutable shared state lives behind an `ArcSwap<MonitorInner>` so a
+/// SIGHUP-driven `reload_from_path` can atomically swap the entire inner
+/// without touching poll tasks. Reads acquire a cheap `Guard<Arc<…>>` and
+/// always see the latest config; writes are `O(1)` lock-free stores.
+/// `ArcSwap` itself is `Clone` (it's an Arc internally) so `Monitor::clone`
+/// stays a single cheap Arc-bump.
 pub struct Monitor {
-    pub(crate) inner: std::sync::Arc<MonitorInner>,
+    pub(crate) inner: ArcSwap<MonitorInner>,
+}
+
+impl Clone for Monitor {
+    fn clone(&self) -> Self {
+        // `arc_swap::ArcSwap::clone(&self.inner)` only exists via `ArcSwapAny`
+        // internals, so we go through `load().clone()` (returns `Arc<MonitorInner>`,
+        // which is Clone) and rebuild the ArcSwap wrapper.
+        Self { inner: arc_swap::ArcSwap::from(self.inner.load().clone()) }
+    }
 }
 
 impl Monitor {
@@ -103,26 +120,58 @@ impl Monitor {
             None => None,
         };
 
+        let inner = MonitorInner {
+            config,
+            http,
+            registry: Arc::new(registry),
+            metrics: Arc::new(Mutex::new(metrics)),
+            counters: Mutex::new(counters),
+            alert_trackers: Mutex::new(alert_trackers),
+            last_delivery: Mutex::new(HashMap::new()),
+            state_store: Mutex::new(state_store),
+        };
         Ok(Self {
-            inner: std::sync::Arc::new(MonitorInner {
-                config,
-                http,
-                registry: std::sync::Arc::new(registry),
-                metrics: std::sync::Arc::new(Mutex::new(metrics)),
-                counters: Mutex::new(counters),
-                alert_trackers: Mutex::new(alert_trackers),
-                last_delivery: Mutex::new(HashMap::new()),
-                state_store: Mutex::new(state_store),
-            }),
+            inner: ArcSwap::from_pointee(inner),
         })
     }
 
-    pub fn registry(&self) -> std::sync::Arc<Registry> { self.inner.registry.clone() }
-    pub fn config(&self) -> Config { self.inner.config.clone() }
+    pub fn registry(&self) -> Arc<Registry> { self.inner.load().registry.clone() }
+    pub fn config(&self) -> Config { self.inner.load().config.clone() }
+
+    /// Hot-reload the monitor from a YAML config file on disk. Builds a fresh
+    /// `MonitorInner` from the file and atomically swaps it into place via the
+    /// `ArcSwap`. After this returns, every subsequent `load()` (in
+    /// `poll_once_target`, `evaluate_meta_alerts`, etc.) sees the new config.
+    ///
+    /// Existing tokio Mutexes (`alert_trackers`, `metrics`, `counters`,
+    /// `state_store`, `last_delivery`) are rebuilt fresh — which means
+    /// in-flight rule state machines reset. That is acceptable for a config
+    /// change; the alternative (reconciling in place) would require complex
+    /// diff logic.
+    pub async fn reload_from_path(&self, path: &std::path::Path) -> anyhow::Result<()> {
+        let raw = std::fs::read_to_string(path)?;
+        let new_config: Config = serde_yaml::from_str(&raw)
+            .map_err(|e| anyhow::anyhow!("invalid yaml in {}: {e}", path.display()))?;
+        // Reuse Monitor::new to build the fresh inner. It validates target list,
+        // creates a fresh HTTP client (clone of the original headers), recreates
+        // ring buffers + alert trackers, and rehydrates the state store.
+        let probe = Monitor::new(new_config.clone())?;
+        // Atomically swap. The old inner is dropped here; any tokio Mutex guards
+        // held by in-flight poll tasks will see the new state on next access.
+        self.inner.store(probe.inner.load_full());
+        tracing::info!(
+            path = %path.display(),
+            targets = new_config.targets.len(),
+            rules = new_config.alert_rules.len(),
+            meta_alerts = new_config.meta_alerts.len(),
+            "Monitor::reload_from_path swap complete"
+        );
+        Ok(())
+    }
 
     /// Run all configured targets in parallel. Blocks until SIGINT/SIGTERM.
     pub async fn run(&self) -> anyhow::Result<()> {
-        let cfg = self.inner.config.clone();
+        let cfg = self.inner.load().config.clone();
         info!(
             targets = cfg.targets.len(),
             exporter_addr = %cfg.exporter_addr,

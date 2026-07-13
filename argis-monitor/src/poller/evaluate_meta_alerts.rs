@@ -23,9 +23,10 @@ use super::monitor::Monitor;
 /// `AlertRule.webhooks` for the same target is used as the fallback so
 /// operators don't have to configure meta-alert webhooks twice.
 pub(crate) async fn evaluate_meta_alerts_impl(me: &Monitor, ts: u64) -> Vec<String> {
-    let rules = me.inner.config.meta_alerts.clone();
+    let inner = me.inner.load();
+    let rules = inner.config.meta_alerts.clone();
     if rules.is_empty() { return Vec::new(); }
-    let mut store_guard = me.inner.state_store.lock().await;
+    let mut store_guard = inner.state_store.lock().await;
     let store = match store_guard.as_mut() {
         Some(s) => s,
         None => {
@@ -80,10 +81,10 @@ pub(crate) async fn evaluate_meta_alerts_impl(me: &Monitor, ts: u64) -> Vec<Stri
             let webhook_targets: Vec<alerts::WebhookTarget> = if !rule.webhooks.is_empty() {
                 rule.webhooks.clone()
             } else {
-                me.inner.config.alert_rules.iter()
+                inner.config.alert_rules.iter()
                     .find(|ar| {
                         ar.name == rule.rule.clone().unwrap_or_default()
-                            && me.inner.config.targets.iter().any(|t| t.name == ar.slo || t.name == rule.target)
+                            && inner.config.targets.iter().any(|t| t.name == ar.slo || t.name == rule.target)
                     })
                     .map(|ar| ar.webhooks.clone())
                     .unwrap_or_default()
@@ -97,9 +98,9 @@ pub(crate) async fn evaluate_meta_alerts_impl(me: &Monitor, ts: u64) -> Vec<Stri
                 );
             } else {
                 let reports = webhook::deliver_all(
-                    &me.inner.http, &webhook_targets, &payload,
+                    &inner.http, &webhook_targets, &payload,
                 ).await;
-                let mut last = me.inner.last_delivery.lock().await;
+                let mut last = inner.last_delivery.lock().await;
                 for r in reports {
                     last.insert(r.url.clone(), r);
                 }

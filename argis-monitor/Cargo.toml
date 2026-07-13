@@ -45,6 +45,8 @@ serde_json = "1"
 # Errors.
 thiserror = "1"
 anyhow = "1"
+# Lock-free atomic Arc swap (slice 24: enables true SIGHUP hot-reload swap).
+arc-swap = "1"
 # Tracing substrate (init + per-poll spans).
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

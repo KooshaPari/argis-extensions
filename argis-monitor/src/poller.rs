@@ -44,10 +44,10 @@ impl Monitor {
 
     /// Backward-compat helper: poll the first target once.
     pub async fn poll_once(&self) -> Result<PollOutcome, PollError> {
-        let target = self.inner.config.targets.first()
+        let target = self.inner.load().config.targets.first()
             .ok_or(PollError::NoTargets)?
             .clone();
-        self.poll_once_target(&target, self.inner.config.poll_timeout).await
+        self.poll_once_target(&target, self.inner.load().config.poll_timeout).await
     }
 
     pub fn windows(&self) -> &'static [BurnWindow] {
