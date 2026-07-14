@@ -52,6 +52,7 @@
 | REQ-OTLP-01 | OTLP HTTP push config parses + defaults to disabled | tests/contract.rs | config_parses_otlp_http_endpoint, config_defaults_otlp_to_disabled | PASS | SLICE-28 |
 | REQ-GAUGE-01 | meta_alerts_active gauge flips 0/1 with count vs threshold | tests/contract.rs | meta_alert_active_gauge_flips_with_threshold | PASS | SLICE-29 |
 | REQ-ERR-01 | exporter metrics endpoint returns text/plain on success | tests/contract.rs | exporter_metrics_endpoint_returns_prometheus_text_on_success | PASS | SLICE-30 |
+| REQ-CNT-02 | meta_alerts_fired_by_target_total counter increments per fire, partitioned by (target, severity) | tests/contract.rs | meta_alert_fires_increment_by_target_counter | PASS | SLICE-32 |
 ## Future tests (after PR #209 merge — meta-alerts slice)
 
 | Req ID | Requirement | Test cases | Notes |

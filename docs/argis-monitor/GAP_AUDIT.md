@@ -77,6 +77,7 @@ Snapshot from `wc -l argis-monitor/src/*.rs` on the merge queue base
 | GAP-H10 | P2 | no OTLP push path (gRPC only) | PR #209 SLICE-28 (commit `8ddbf45`) - HTTP opt-in |
 | GAP-H11 | P2 | meta-alert Prometheus had no active-state gauge | PR #209 SLICE-29 (commit `8ddbf45`) |
 | GAP-H12 | P2 | exporter returned raw err.message on encode failure | PR #209 SLICE-30 (commit `8ddbf45`) - structured JSON envelope |
+| GAP-H13 | P2 | meta-alert counter had no per-target breakdown | PR #209 SLICE-32 (commit `1d6f373`) |
 
 ## Cross-cutting compliance check
 

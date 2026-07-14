@@ -126,6 +126,7 @@
 | SLICE-28 | HTTP transport for OTLP (opt-in) | `8ddbf45` | DONE | `otlp_http_endpoint` config field, no new dep (reqwest), periodic POST of text exposition |
 | SLICE-29 | Prometheus `argis_monitor_meta_alerts_active` gauge | `8ddbf45` | DONE | flips 0/1 per rule on every evaluate_meta_alerts call |
 | SLICE-30 | structured JSON error envelope for exporter | `8ddbf45` | DONE | per AGENTS.md sec 11 security pattern; no raw err.stack in body |
+| SLICE-32 | meta_alerts_fired_by_target_total counter (per-target breakdown) | `1d6f373` | DONE | MetaAlertByTargetLabels {target, severity}; useful for "which target fires most" dashboards |
 
 ## Phase 8 - Planned (slices 31+)
 
