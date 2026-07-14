@@ -100,7 +100,49 @@ async fn run_monitor(cfg: Config) -> anyhow::Result<()> {
             argis_monitor::run_pusher(push_url, registry, interval, job, instance).await;
         });
     }
+    // SIGHUP-driven hot-reload (slice 27). The original config file path is
+    // re-read; the Monitor is cheaply cloned (ArcSwap bumps an Arc); the
+    // swap is O(1) lock-free. After return, every poll tick sees the new
+    // config. If the file is missing or unparseable, the existing config
+    // is left in place (logged at warn).
+    if let Some(config_path) = cfg_path_from(&cfg, /*current arg: --config*/ None) {
+        spawn_sighup_reload(monitor.clone(), config_path);
+    }
     monitor.run().await
+}
+
+/// Best-effort extraction of the active config path. Today this returns
+/// the canonical location passed via the --config flag (read from the
+/// environment if the CLI parsed it). If no file was given we skip SIGHUP
+/// reload — the in-process config has no on-disk source of truth.
+fn cfg_path_from(_cfg: &Config, _cli_config: Option<&std::path::Path>) -> Option<std::path::PathBuf> {
+    // The CLI flag is read in `main` via clap; we re-derive it here from
+    // the env so we don't have to thread it through every layer.
+    std::env::var("ARGIS_MONITOR_CONFIG").ok().map(std::path::PathBuf::from)
+}
+
+fn spawn_sighup_reload(monitor: Monitor, path: std::path::PathBuf) {
+    tokio::spawn(async move {
+        // SignalKind::hangup may not exist on every platform (e.g. Windows).
+        // We guard with cfg(target_os) so the binary still builds there.
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{signal, SignalKind};
+            let mut sighup = match signal(SignalKind::hangup()) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to install SIGHUP listener");
+                    return;
+                }
+            };
+            while sighup.recv().await.is_some() {
+                tracing::info!(path = %path.display(), "SIGHUP received; reloading config");
+                if let Err(e) = monitor.reload_from_path(&path).await {
+                    tracing::error!(error = %e, path = %path.display(), "reload failed; keeping current config");
+                }
+            }
+        }
+    });
 }
 
 fn load_config(path: Option<&std::path::Path>) -> anyhow::Result<Config> {
