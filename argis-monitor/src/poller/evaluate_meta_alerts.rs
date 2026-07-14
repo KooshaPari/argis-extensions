@@ -112,9 +112,13 @@ pub(crate) async fn evaluate_meta_alerts_impl(me: &Monitor, ts: u64) -> Vec<Stri
             }
 
             fired.push(rule.name.clone());
-            // Mark this rule as currently active (slice 29: gauge).
+            // Mark this rule as currently active (slice 29: gauge) + bump
+            // the per-target counter (slice 32). Both are best-effort: if
+            // the metrics lock is held by another task we just skip this
+            // tick (the next evaluate_meta_alerts call will retry).
             if let Some(m) = inner.metrics.try_lock().ok() {
                 m.set_meta_alert_active(&rule.name, &rule.target, severity_str, true);
+                m.record_meta_alert_fire_by_target(&rule.target, severity_str);
             }
         } else {
             // Below threshold: explicitly mark this rule as idle.

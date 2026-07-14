@@ -1304,3 +1304,69 @@ async fn exporter_metrics_endpoint_returns_prometheus_text_on_success() {
     let _ = handle.shutdown.send(true);
 }
 
+// =====================================================================
+// Slice 32: meta_alerts_fired_by_target_total counter
+// =====================================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn meta_alert_fires_increment_by_target_counter() {
+    use argis_monitor::alerts::{MetaAlertRule, Severity, WebhookTarget};
+    use argis_monitor::state_store::StateStore;
+
+    let data_dir = std::env::temp_dir().join(format!(
+        "argis-slice32-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&data_dir).unwrap();
+    let db_path = data_dir.join("alert_state.sqlite");
+    {
+        let mut store = StateStore::open(&db_path).expect("open store");
+        let now: u64 = 1_700_030_000;
+        // 3 failures on "gateway::*" so the meta-alert fires once.
+        for offset in [5_u64, 15, 25] {
+            store.record_alert_failure("gateway::*", now - offset, "500").expect("rec");
+        }
+    }
+    let meta_rule = MetaAlertRule {
+        name: "outage_per_target".into(),
+        target: "gateway".into(),
+        rule: None,
+        consecutive_failures: 3,
+        window: std::time::Duration::from_secs(60),
+        severity: Severity::Warning,
+        reason: None,
+        webhooks: vec![WebhookTarget { url: "http://127.0.0.1:1".into(), ..Default::default() }],
+    };
+    let mut cfg = Config::for_test("http://127.0.0.1:1");
+    cfg.data_dir = Some(data_dir.clone());
+    cfg.targets.clear();
+    cfg.targets.push(argis_monitor::Target::new("gateway", "http://127.0.0.1:1"));
+    cfg.meta_alerts.push(meta_rule);
+    let monitor = argis_monitor::Monitor::new(cfg).expect("monitor");
+
+    let fired = monitor.evaluate_meta_alerts(1_700_030_000).await;
+    assert_eq!(fired, vec!["outage_per_target".to_string()]);
+
+    let mut buf = String::new();
+    prometheus_client::encoding::text::encode(&mut buf, &monitor.registry()).unwrap();
+    assert!(buf.contains("argis_monitor_meta_alerts_fired_by_target_total"),
+        "expected the new counter to be exposed:
+{buf}");
+    // The by_target line should be partitioned by target=gateway + severity=warning
+    // with value 1.
+    let line = buf.lines().find(|l| {
+        l.starts_with("argis_monitor_meta_alerts_fired_by_target_total_total{")
+            && l.contains("target=\"gateway\"")
+            && l.contains("severity=\"warning\"")
+    });
+    assert!(line.is_some(), "expected by_target line for gateway/warning:
+{buf}");
+    assert!(line.unwrap().ends_with(" 1"), "expected counter=1 after one fire: {line:?}");
+
+    let _ = std::fs::remove_dir_all(&data_dir);
+}
+

@@ -61,6 +61,12 @@ pub struct MetaAlertLabels {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct MetaAlertByTargetLabels {
+    pub target: String,
+    pub severity: String,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct InfoLabels {
     pub target: String,
     pub version: String,
@@ -98,6 +104,10 @@ pub struct Metrics {
     pub slo_target: Family<SloOnlyLabels, Gauge>,
     pub target_info: Family<InfoLabels, Counter>,
     pub meta_alerts_fired_total: Family<MetaAlertLabels, Counter>,
+    /// Total meta-alerts fired, partitioned by (target, severity) only. Useful
+    /// for "which target is generating the most fires" dashboards that don't
+    /// care about the rule name.
+    pub meta_alerts_fired_by_target_total: Family<MetaAlertByTargetLabels, Counter>,
     /// Current firing state per (meta, target). 1 if the rule's
     /// failure count is currently above its `consecutive_failures` threshold,
     /// 0 otherwise. Lets dashboards show "how many meta-alerts are currently
@@ -122,6 +132,7 @@ impl Metrics {
         let slo_target = Family::<SloOnlyLabels, Gauge>::default();
         let target_info = Family::<InfoLabels, Counter>::default();
         let meta_alerts_fired_total = Family::<MetaAlertLabels, Counter>::default();
+        let meta_alerts_fired_by_target_total = Family::<MetaAlertByTargetLabels, Counter>::default();
         let meta_alerts_active = Family::<MetaAlertLabels, Gauge>::default();
 
         registry.register("argis_monitor_polls_total", "Total polls attempted.", polls_total.clone());
@@ -146,6 +157,11 @@ impl Metrics {
             meta_alerts_fired_total.clone(),
         );
         registry.register(
+            "argis_monitor_meta_alerts_fired_by_target_total",
+            "Total meta-alerts fired, partitioned by target and severity (no meta-alert name).",
+            meta_alerts_fired_by_target_total.clone(),
+        );
+        registry.register(
             "argis_monitor_meta_alerts_active",
             "Current firing state per (meta, target, severity). 1 if the rule's failure count is currently above its consecutive_failures threshold, 0 otherwise.",
             meta_alerts_active.clone(),
@@ -155,7 +171,7 @@ impl Metrics {
             .get_or_create(&InfoLabels { target: target.into(), version: env!("CARGO_PKG_VERSION").into() })
             .inc();
 
-        Self { polls_total, poll_errors_total, poll_duration, last_poll_ts, up, burn_rate, slo_target, target_info, meta_alerts_fired_total, meta_alerts_active }
+        Self { polls_total, poll_errors_total, poll_duration, last_poll_ts, up, burn_rate, slo_target, target_info, meta_alerts_fired_total, meta_alerts_fired_by_target_total, meta_alerts_active }
     }
 
     pub fn record_sample(&self, s: &Sample) {
@@ -205,6 +221,18 @@ impl Metrics {
         self.meta_alerts_fired_total
             .get_or_create(&MetaAlertLabels {
                 meta: meta.into(),
+                target: target.into(),
+                severity: severity.into(),
+            })
+            .inc();
+    }
+
+    /// Increment the meta-alert fired counter for a (target, severity) tuple
+    /// (no meta-alert name). Called alongside `record_meta_alert_fire` for
+    /// dashboards that want per-target totals.
+    pub fn record_meta_alert_fire_by_target(&self, target: &str, severity: &str) {
+        self.meta_alerts_fired_by_target_total
+            .get_or_create(&MetaAlertByTargetLabels {
                 target: target.into(),
                 severity: severity.into(),
             })
