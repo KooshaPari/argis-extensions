@@ -43,6 +43,11 @@
 | REQ-AUTH-JWT-FILE | bearer token file rotation | alerts.rs (slice 10d) | tests/contract.rs | bearer_token_file_reads_contents | PASS | pending merge via #197 |
 | REQ-AUTH-JWT-MISSING | bearer token file missing logs no panic | alerts.rs (slice 10d) | tests/contract.rs | bearer_token_file_missing_logs_no_panic | PASS | pending merge via #197 |
 
+
+| REQ-HOTRELOAD-01 | reload_from_path atomically swaps MonitorInner (config + rules + meta_alerts + targets) | tests/contract.rs | reload_from_path_atomically_swaps_monitor_inner | PASS | SLICE-24 |
+| REQ-HOTRELOAD-02 | hot-reload meta_alerts: rename + threshold + severity + reason all swap on next eval | tests/contract.rs | hot_reload_swaps_meta_alerts_atomically | PASS | SLICE-25 |
+| REQ-SIGHUP-01 | main.rs spawn_sIGHUP listener triggers reload_from_path on file change | (manual verification: signal flow + reload impl) | (code review of main.rs::spawn_sighup_reload) | PASS | SLICE-27 |
+
 ## Future tests (after PR #209 merge — meta-alerts slice)
 
 | Req ID | Requirement | Test cases | Notes |

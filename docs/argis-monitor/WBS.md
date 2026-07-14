@@ -108,3 +108,15 @@
 - `gh api repos/KooshaPari/argis-extensions/pulls/{N}` returns canonical state
 - A re-derivation script can re-derive this table from the API + git log;
   if this doc drifts from the API, the API wins (status: live-source-of-truth)
+
+
+## Phase 7.1 - Decompositions + Hot-reload (slices 23-27)
+
+| Slice | Title | Commit | Status | Notes |
+|-------|-------|--------|--------|-------|
+| SLICE-23 | decompose state_store.rs + poller.rs (file-size mandate) | `4b54956` | DONE | PR #209, 22 + 5 + 5 submodules, 0 API change |
+| SLICE-24 | real SIGHUP hot-reload swap (ArcSwap) | `2a8b7c9` | DONE | arc-swap = 1, Monitor.inner = ArcSwap<MonitorInner>, reload_from_path does O(1) lock-free store |
+| SLICE-25 | hot-reload meta_alerts via SIGHUP (verified) | `619e593` | DONE | enabled by slice-24 swap; integration test proves rename + threshold + severity + reason all swap |
+| SLICE-26 | decompose alerts.rs (file-size mandate) | `d7f10b7` | DONE | PR #209, 34 + 7 submodules (largest 112) |
+| SLICE-27 | SIGHUP listener in main.rs | `a648c79` | DONE | spawn_sighup_reload in run_monitor; cfg(unix) gated so Windows builds |
+

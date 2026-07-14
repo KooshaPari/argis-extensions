@@ -70,6 +70,10 @@ Snapshot from `wc -l argis-monitor/src/*.rs` on the merge queue base
 | GAP-H05 | P0 | meta-alert fires invisible to Prometheus | PR #209 SLICE-22 (commit `5072aa3`) |
 | GAP-H06 | P1 | argis-monitor Rust tests broken (WebhookTarget::Default) | commit `6a5ceda` (this session) |
 
+| GAP-H07 | P0 | SLICE-10c reload_from_path was a stub (logs only) | PR #209 SLICE-24 (commit `2a8b7c9`) |
+| GAP-H08 | P1 | meta_alerts not hot-reloadable | PR #209 SLICE-25 (commit `619e593`) — enabled by slice 24 swap |
+| GAP-H09 | P1 | SIGHUP listener didn't actually reload (slice-10c partial) | PR #209 SLICE-27 (commit `a648c79`) |
+
 ## Cross-cutting compliance check
 
 | Mandate | Source | Status |
