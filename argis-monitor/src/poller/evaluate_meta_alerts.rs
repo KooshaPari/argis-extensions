@@ -42,6 +42,11 @@ pub(crate) async fn evaluate_meta_alerts_impl(me: &Monitor, ts: u64) -> Vec<Stri
             Some(r) => format!("{}::{}", rule.target, r),
             None => format!("{}::*", rule.target),
         };
+        let severity_str = match rule.severity {
+            crate::alerts::Severity::Critical => "critical",
+            crate::alerts::Severity::Warning => "warning",
+            crate::alerts::Severity::Ok => "ok",
+        };
         let count = match store.count_failures_in_window(&key, rule.window.as_secs(), ts) {
             Ok(n) => n,
             Err(e) => {
@@ -107,6 +112,15 @@ pub(crate) async fn evaluate_meta_alerts_impl(me: &Monitor, ts: u64) -> Vec<Stri
             }
 
             fired.push(rule.name.clone());
+            // Mark this rule as currently active (slice 29: gauge).
+            if let Some(m) = inner.metrics.try_lock().ok() {
+                m.set_meta_alert_active(&rule.name, &rule.target, severity_str, true);
+            }
+        } else {
+            // Below threshold: explicitly mark this rule as idle.
+            if let Some(m) = inner.metrics.try_lock().ok() {
+                m.set_meta_alert_active(&rule.name, &rule.target, severity_str, false);
+            }
         }
     }
     fired

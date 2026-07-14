@@ -98,6 +98,11 @@ pub struct Metrics {
     pub slo_target: Family<SloOnlyLabels, Gauge>,
     pub target_info: Family<InfoLabels, Counter>,
     pub meta_alerts_fired_total: Family<MetaAlertLabels, Counter>,
+    /// Current firing state per (meta, target). 1 if the rule's
+    /// failure count is currently above its `consecutive_failures` threshold,
+    /// 0 otherwise. Lets dashboards show "how many meta-alerts are currently
+    /// tripping" without scraping `_fired_total` deltas.
+    pub meta_alerts_active: Family<MetaAlertLabels, Gauge>,
 }
 
 impl Metrics {
@@ -117,6 +122,7 @@ impl Metrics {
         let slo_target = Family::<SloOnlyLabels, Gauge>::default();
         let target_info = Family::<InfoLabels, Counter>::default();
         let meta_alerts_fired_total = Family::<MetaAlertLabels, Counter>::default();
+        let meta_alerts_active = Family::<MetaAlertLabels, Gauge>::default();
 
         registry.register("argis_monitor_polls_total", "Total polls attempted.", polls_total.clone());
         registry.register("argis_monitor_poll_errors_total", "Total polls that failed.", poll_errors_total.clone());
@@ -139,12 +145,17 @@ impl Metrics {
             "Total meta-alerts fired, partitioned by meta-alert name, target, and severity.",
             meta_alerts_fired_total.clone(),
         );
+        registry.register(
+            "argis_monitor_meta_alerts_active",
+            "Current firing state per (meta, target, severity). 1 if the rule's failure count is currently above its consecutive_failures threshold, 0 otherwise.",
+            meta_alerts_active.clone(),
+        );
 
         target_info
             .get_or_create(&InfoLabels { target: target.into(), version: env!("CARGO_PKG_VERSION").into() })
             .inc();
 
-        Self { polls_total, poll_errors_total, poll_duration, last_poll_ts, up, burn_rate, slo_target, target_info, meta_alerts_fired_total }
+        Self { polls_total, poll_errors_total, poll_duration, last_poll_ts, up, burn_rate, slo_target, target_info, meta_alerts_fired_total, meta_alerts_active }
     }
 
     pub fn record_sample(&self, s: &Sample) {
@@ -198,6 +209,20 @@ impl Metrics {
                 severity: severity.into(),
             })
             .inc();
+    }
+
+    /// Set the active (1) or idle (0) state for a meta-alert on a target.
+    /// Called by `evaluate_meta_alerts` after each rule evaluation so the
+    /// gauge mirrors the underlying alert_failures count vs threshold.
+    pub fn set_meta_alert_active(&self, meta: &str, target: &str, severity: &str, active: bool) {
+        let v: i64 = if active { 1 } else { 0 };
+        self.meta_alerts_active
+            .get_or_create(&MetaAlertLabels {
+                meta: meta.into(),
+                target: target.into(),
+                severity: severity.into(),
+            })
+            .set(v);
     }
 }
 

@@ -1159,3 +1159,148 @@ data_dir: ~
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+
+// =====================================================================
+// Slice 28: HTTP transport for OTLP (opt-in via otlp_http_endpoint config)
+// =====================================================================
+
+#[test]
+fn config_parses_otlp_http_endpoint() {
+    use argis_monitor::Config;
+    let yaml = r#"
+targets:
+  - name: gateway
+    url: http://127.0.0.1:1
+    poll_interval: 15s
+exporter_addr: "0.0.0.0:9090"
+alert_rules: []
+meta_alerts: []
+data_dir: null
+otlp_http_endpoint: "http://otel-collector:4318/v1/metrics"
+otlp_push_interval_secs: 45
+"#;
+    let cfg: Config = serde_yaml::from_str(yaml).expect("parse otlp config");
+    assert_eq!(cfg.otlp_http_endpoint.as_deref(), Some("http://otel-collector:4318/v1/metrics"));
+    assert_eq!(cfg.otlp_push_interval_secs, 45);
+}
+
+#[test]
+fn config_defaults_otlp_to_disabled() {
+    use argis_monitor::Config;
+    let cfg = Config::default();
+    assert!(cfg.otlp_http_endpoint.is_none(), "OTLP should be off by default");
+    assert_eq!(cfg.otlp_push_interval_secs, 30);
+}
+
+// =====================================================================
+// Slice 29: meta_alerts_active Prometheus gauge
+// =====================================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn meta_alert_active_gauge_flips_with_threshold() {
+    use argis_monitor::alerts::{MetaAlertRule, Severity, WebhookTarget};
+    use argis_monitor::state_store::StateStore;
+
+    let data_dir = std::env::temp_dir().join(format!(
+        "argis-slice29-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&data_dir).unwrap();
+    let db_path = data_dir.join("alert_state.sqlite");
+    {
+        let mut store = StateStore::open(&db_path).expect("open store");
+        let now: u64 = 1_700_020_000;
+        // 2 failures, threshold is 3 -> NOT active.
+        store.record_alert_failure("gateway::*", now - 5, "500").expect("rec");
+        store.record_alert_failure("gateway::*", now - 15, "500").expect("rec");
+    }
+    let meta_rule = MetaAlertRule {
+        name: "outage".into(),
+        target: "gateway".into(),
+        rule: None,
+        consecutive_failures: 3,
+        window: std::time::Duration::from_secs(60),
+        severity: Severity::Critical,
+        reason: None,
+        webhooks: vec![WebhookTarget { url: "http://127.0.0.1:1".into(), ..Default::default() }],
+    };
+    let mut cfg = Config::for_test("http://127.0.0.1:1");
+    cfg.data_dir = Some(data_dir.clone());
+    cfg.targets.clear();
+    cfg.targets.push(argis_monitor::Target::new("gateway", "http://127.0.0.1:1"));
+    cfg.meta_alerts.push(meta_rule);
+    let monitor = argis_monitor::Monitor::new(cfg).expect("monitor");
+
+    // 1st eval: 2 failures, threshold 3 -> idle. Gauge = 0.
+    let fired = monitor.evaluate_meta_alerts(1_700_020_000).await;
+    assert!(fired.is_empty());
+    let mut buf = String::new();
+    prometheus_client::encoding::text::encode(&mut buf, &monitor.registry()).unwrap();
+    assert!(buf.contains("argis_monitor_meta_alerts_active"));
+    assert!(buf.contains("meta=\"outage\"") && buf.contains("severity=\"critical\""));
+    // Idle line should have value 0.
+    let active_line = buf.lines().find(|l| l.starts_with("argis_monitor_meta_alerts_active{") && l.contains("meta=\"outage\""));
+    assert!(active_line.is_some(), "expected active gauge for outage: {buf}");
+    assert!(active_line.unwrap().ends_with(" 0"), "expected gauge=0 when below threshold, got: {active_line:?}");
+
+    // Seed 1 more failure -> 3 total, threshold 3 -> active. Gauge = 1.
+    {
+        let mut store = StateStore::open(&db_path).expect("open store");
+        store.record_alert_failure("gateway::*", 1_700_020_000 - 25, "500").expect("rec");
+    }
+    let fired = monitor.evaluate_meta_alerts(1_700_020_000).await;
+    assert_eq!(fired, vec!["outage".to_string()]);
+    let mut buf = String::new();
+    prometheus_client::encoding::text::encode(&mut buf, &monitor.registry()).unwrap();
+    let active_line = buf.lines().find(|l| l.starts_with("argis_monitor_meta_alerts_active{") && l.contains("meta=\"outage\""));
+    assert!(active_line.is_some());
+    assert!(active_line.unwrap().ends_with(" 1"), "expected gauge=1 when at threshold, got: {active_line:?}");
+
+    // Drain the failures (so 0 in window) -> idle again. Gauge = 0.
+    {
+        let mut store = StateStore::open(&db_path).expect("open store");
+        store.prune_alert_failures(1_700_020_000).expect("prune all");
+    }
+    let _ = monitor.evaluate_meta_alerts(1_700_020_000).await;
+    let mut buf = String::new();
+    prometheus_client::encoding::text::encode(&mut buf, &monitor.registry()).unwrap();
+    let active_line = buf.lines().find(|l| l.starts_with("argis_monitor_meta_alerts_active{") && l.contains("meta=\"outage\""));
+    assert!(active_line.is_some());
+    assert!(active_line.unwrap().ends_with(" 0"), "expected gauge=0 when drained, got: {active_line:?}");
+
+    let _ = std::fs::remove_dir_all(&data_dir);
+}
+
+// =====================================================================
+// Slice 30: structured JSON error envelope for exporter encode failures
+// =====================================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exporter_metrics_endpoint_returns_prometheus_text_on_success() {
+    use axum::http::StatusCode;
+    use argis_monitor::exporter;
+    use std::net::SocketAddr;
+
+    // Bind to a random port and verify the happy path: 200 + text/plain.
+    let monitor = argis_monitor::Monitor::new(Config::for_test("http://127.0.0.1:1")).expect("monitor");
+    let registry = monitor.registry();
+    let addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+    let handle = exporter::serve(&addr.to_string(), registry).await.expect("serve");
+    let url = format!("http://{}/metrics", handle.addr);
+
+    let client = reqwest::Client::new();
+    let resp = client.get(&url).send().await.expect("GET /metrics");
+    assert_eq!(resp.status(), StatusCode::OK);
+    let ct = resp.headers().get(reqwest::header::CONTENT_TYPE).map(|v| v.to_str().unwrap_or("")).unwrap_or("").to_string();
+    assert!(ct.starts_with("text/plain"), "expected text/plain, got: {ct}");
+    let body = resp.text().await.expect("body");
+    assert!(body.contains("argis_monitor_target_info"), "expected baseline metric in body");
+
+    // Best-effort shutdown; ignore errors.
+    let _ = handle.shutdown.send(true);
+}
+

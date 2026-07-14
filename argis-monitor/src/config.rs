@@ -96,9 +96,18 @@ pub struct Config {
     /// "host-{pid}" where {pid} is the current process id.
     #[serde(default)]
     pub push_instance: Option<String>,
+    /// Optional OTLP-over-HTTP endpoint (e.g. http://otel-collector:4318/v1/metrics).
+    /// When set, the monitor POSTs the Prometheus text exposition to this URL
+    /// every `otlp_push_interval_secs` seconds. Off by default (no extra dep).
+    #[serde(default)]
+    pub otlp_http_endpoint: Option<String>,
+    /// OTLP push interval in seconds. Defaults to 30s.
+    #[serde(default = "default_otlp_push_interval")]
+    pub otlp_push_interval_secs: u64,
 }
 
 fn default_push_interval() -> u64 { 15 }
+fn default_otlp_push_interval() -> u64 { 30 }
 
 fn default_data_dir() -> Option<std::path::PathBuf> {
     Some(std::path::PathBuf::from("./data"))
@@ -124,6 +133,8 @@ impl Default for Config {
             push_interval_secs: default_push_interval(),
             push_job: None,
             push_instance: None,
+            otlp_http_endpoint: None,
+            otlp_push_interval_secs: default_otlp_push_interval(),
             alert_windows: Vec::new(),
         }
     }
