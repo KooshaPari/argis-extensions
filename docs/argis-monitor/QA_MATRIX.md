@@ -48,6 +48,10 @@
 | REQ-HOTRELOAD-02 | hot-reload meta_alerts: rename + threshold + severity + reason all swap on next eval | tests/contract.rs | hot_reload_swaps_meta_alerts_atomically | PASS | SLICE-25 |
 | REQ-SIGHUP-01 | main.rs spawn_sIGHUP listener triggers reload_from_path on file change | (manual verification: signal flow + reload impl) | (code review of main.rs::spawn_sighup_reload) | PASS | SLICE-27 |
 
+
+| REQ-OTLP-01 | OTLP HTTP push config parses + defaults to disabled | tests/contract.rs | config_parses_otlp_http_endpoint, config_defaults_otlp_to_disabled | PASS | SLICE-28 |
+| REQ-GAUGE-01 | meta_alerts_active gauge flips 0/1 with count vs threshold | tests/contract.rs | meta_alert_active_gauge_flips_with_threshold | PASS | SLICE-29 |
+| REQ-ERR-01 | exporter metrics endpoint returns text/plain on success | tests/contract.rs | exporter_metrics_endpoint_returns_prometheus_text_on_success | PASS | SLICE-30 |
 ## Future tests (after PR #209 merge — meta-alerts slice)
 
 | Req ID | Requirement | Test cases | Notes |

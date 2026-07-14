@@ -74,6 +74,10 @@ Snapshot from `wc -l argis-monitor/src/*.rs` on the merge queue base
 | GAP-H08 | P1 | meta_alerts not hot-reloadable | PR #209 SLICE-25 (commit `619e593`) — enabled by slice 24 swap |
 | GAP-H09 | P1 | SIGHUP listener didn't actually reload (slice-10c partial) | PR #209 SLICE-27 (commit `a648c79`) |
 
+| GAP-H10 | P2 | no OTLP push path (gRPC only) | PR #209 SLICE-28 (commit `8ddbf45`) - HTTP opt-in |
+| GAP-H11 | P2 | meta-alert Prometheus had no active-state gauge | PR #209 SLICE-29 (commit `8ddbf45`) |
+| GAP-H12 | P2 | exporter returned raw err.message on encode failure | PR #209 SLICE-30 (commit `8ddbf45`) - structured JSON envelope |
+
 ## Cross-cutting compliance check
 
 | Mandate | Source | Status |

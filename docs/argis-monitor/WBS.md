@@ -119,4 +119,18 @@
 | SLICE-25 | hot-reload meta_alerts via SIGHUP (verified) | `619e593` | DONE | enabled by slice-24 swap; integration test proves rename + threshold + severity + reason all swap |
 | SLICE-26 | decompose alerts.rs (file-size mandate) | `d7f10b7` | DONE | PR #209, 34 + 7 submodules (largest 112) |
 | SLICE-27 | SIGHUP listener in main.rs | `a648c79` | DONE | spawn_sighup_reload in run_monitor; cfg(unix) gated so Windows builds |
+## Phase 7.2 - Observability + Security (slices 28-30)
 
+| Slice | Title | Commit | Status | Notes |
+|-------|-------|--------|--------|-------|
+| SLICE-28 | HTTP transport for OTLP (opt-in) | `8ddbf45` | DONE | `otlp_http_endpoint` config field, no new dep (reqwest), periodic POST of text exposition |
+| SLICE-29 | Prometheus `argis_monitor_meta_alerts_active` gauge | `8ddbf45` | DONE | flips 0/1 per rule on every evaluate_meta_alerts call |
+| SLICE-30 | structured JSON error envelope for exporter | `8ddbf45` | DONE | per AGENTS.md sec 11 security pattern; no raw err.stack in body |
+
+## Phase 8 - Planned (slices 31+)
+
+| Slice | Title | Status |
+|-------|-------|--------|
+| SLICE-31 | k6 / locust load harness for poll loop | PLANNED |
+| SLICE-32 | Prometheus meta-alert counter per (target, severity) split | PLANNED |
+| SLICE-33 | request-scoped tracing spans (tower-http::trace wiring) | PLANNED |
