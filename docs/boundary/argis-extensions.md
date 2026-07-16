@@ -1,30 +1,28 @@
 <!--
-propagated-from: KooshaPari/phenotype-registry @ chore/l7-001-curation-snapshot
-date: 2026-06-17
-source-commit: a1aa44660
+propagated-from: KooshaPari/phenotype-registry @ chore/l7-010-taxonomy-rerender
+date: 2026-06-21
+source-commit: 2026-06-21-rerender
 do-not-edit-locally: regenerate via scripts/propagate-intent-to-repos.py
                      or update in the source-of-truth registry repo
 -->
-# argis-extensions -- Boundary
+# argis-extensions — Boundary
 
-> Boundary file for argis-extensions. Filled with real prose 2026-06-19.
+> Stub boundary file generated on 2026-06-21 by `scripts/render-stubs.py`
+> for canonical repos with no curated prompts yet.
 
 ## In Scope
 
-Plugin manifest format; version negotiation; hot-reload protocol; capability declarations
+> **TODO**: fill in concrete capabilities owned by argis-extensions.
 
 ## Out of Scope
 
-The Argis host itself (lives in bifrost-extensions); plugin business logic
+> **TODO**: list adjacent responsibilities owned elsewhere (cross-link
+> the canonical owning repo).
 
 ## Crossings
 
-argis-extensions crosses into other Phenotype repos at the following seams:
-
-- **Auth**: depends on AuthKit `typescript/packages/auth-ts/`
-- **Telemetry**: emits OTel traces via pheno-otel
-- **Config**: resolves from `phenotype-config` schema (Pydantic + Zod)
-- **Versioning**: pinned to the pheno-standards `{major.minor}` channel
+> **TODO**: list any repos whose boundaries argis-extensions overlaps and how
+> the overlap is resolved (port, adapter, shared library).
 
 ## Review cadence
 
@@ -33,6 +31,6 @@ once any prompt binds to this repo.
 
 ## Source-of-Truth
 
-- `phenotype-registry/ECOSYSTEM_MAP.md` section 6 (role classification)
-- `docs/intent/argis-extensions.md` (intent statement)
-- `docs/registries.md` section 'Capability & Intent SSOT' (registry layer)
+- ECOSYSTEM_MAP.md § 6 (role classification)
+- docs/intent/argis-extensions.md (intent statement)
+- docs/registries.md (Capability & Intent SSOT layer)
