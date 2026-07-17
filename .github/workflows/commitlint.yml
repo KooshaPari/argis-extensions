@@ -32,13 +32,14 @@ jobs:
           fetch-depth: 0
 
       - name: Validate PR title
-        uses: wagoid/commitlint-github-action@v5
-        with:
-          configFile: .commitlintrc.json
-
-      - name: Validate all commits in PR
         if: github.event_name == 'pull_request'
         uses: wagoid/commitlint-github-action@v5
         with:
           configFile: .commitlintrc.json
-          # default mode already validates all in-PR commits for PR events
+
+      - name: Validate pushed commits
+        if: github.event_name == 'push'
+        uses: wagoid/commitlint-github-action@v5
+        with:
+          configFile: .commitlintrc.json
+          fromGithub: true

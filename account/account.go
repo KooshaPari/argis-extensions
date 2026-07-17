@@ -101,7 +101,7 @@ func defaultProviderConfig() *schemas.ProviderConfig {
 			RetryBackoffInitial:            500 * time.Millisecond,
 			RetryBackoffMax:                5 * time.Second,
 		},
-		ConcurrencyAndBuffer: schemas.ConcurrencyAndBufferSize{
+		ConcurrencyAndBufferSize: schemas.ConcurrencyAndBufferSize{
 			Concurrency: 10,
 			BufferSize:  100,
 		},

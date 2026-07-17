@@ -51,13 +51,13 @@ type OpenAIToolCallFunction struct {
 
 // OpenAIResponse represents an OpenAI-compatible chat completion response
 type OpenAIResponse struct {
-	ID      string           `json:"id"`
-	Object  string           `json:"object"`
-	Created int64            `json:"created"`
-	Model   string           `json:"model"`
-	Choices []OpenAIChoice   `json:"choices"`
-	Usage   *OpenAIUsage     `json:"usage,omitempty"`
-	Error   *OpenAIError     `json:"error,omitempty"`
+	ID      string         `json:"id"`
+	Object  string         `json:"object"`
+	Created int64          `json:"created"`
+	Model   string         `json:"model"`
+	Choices []OpenAIChoice `json:"choices"`
+	Usage   *OpenAIUsage   `json:"usage,omitempty"`
+	Error   *OpenAIError   `json:"error,omitempty"`
 }
 
 // OpenAIChoice represents a choice in the response
@@ -81,28 +81,39 @@ type OpenAIError struct {
 	Code    string `json:"code,omitempty"`
 }
 
+func chatMessageContentString(content *schemas.ChatMessageContent) string {
+	if content == nil || content.ContentStr == nil {
+		return ""
+	}
+	return *content.ContentStr
+}
+
 // convertToBifrostResponse converts OpenAI response to Bifrost format
 func (p *Provider) convertToBifrostResponse(resp *OpenAIResponse) *schemas.BifrostResponse {
-	choices := make([]schemas.ChatResponseChoice, len(resp.Choices))
+	choices := make([]schemas.BifrostResponseChoice, len(resp.Choices))
 	for i, choice := range resp.Choices {
-		choices[i] = schemas.ChatResponseChoice{
+		finishReason := choice.FinishReason
+		content := choice.Message.Content
+		choices[i] = schemas.BifrostResponseChoice{
 			Index:        choice.Index,
-			FinishReason: choice.FinishReason,
-			Message: schemas.ChatMessage{
-				Role:    choice.Message.Role,
-				Content: choice.Message.Content,
+			FinishReason: &finishReason,
+			ChatNonStreamResponseChoice: &schemas.ChatNonStreamResponseChoice{
+				Message: &schemas.ChatMessage{
+					Role:    schemas.ChatMessageRole(choice.Message.Role),
+					Content: &schemas.ChatMessageContent{ContentStr: &content},
+				},
+				StopString: &finishReason,
 			},
 		}
 	}
 
 	return &schemas.BifrostResponse{
-		ExtraFields: map[string]interface{}{
-			"id":      resp.ID,
-			"model":   resp.Model,
-			"created": resp.Created,
-			"object":  "chat.completion",
-			"choices": choices,
-			"usage":   resp.Usage,
+		ChatResponse: &schemas.BifrostChatResponse{
+			ID:      resp.ID,
+			Object:  resp.Object,
+			Model:   resp.Model,
+			Created: int(resp.Created),
+			Choices: choices,
 		},
 	}
 }
@@ -110,12 +121,11 @@ func (p *Provider) convertToBifrostResponse(resp *OpenAIResponse) *schemas.Bifro
 // ChatCompletionStream sends a streaming request through the OAuth proxy
 func (p *Provider) ChatCompletionStream(
 	req *schemas.BifrostRequest,
-	callback func(chunk *schemas.BifrostStream) error,
+	callback func(chunk *schemas.BifrostStreamChunk) error,
 ) *schemas.BifrostError {
-	// TODO: Implement streaming support
 	_ = req
 	_ = callback
-	return nil
+	return makeBifrostError(501, "Streaming not supported for OAuth proxy")
 }
 
 // Embedding is not supported for OAuth proxy
@@ -123,4 +133,3 @@ func (p *Provider) Embedding(req *schemas.BifrostRequest) (*schemas.BifrostRespo
 	_ = req
 	return nil, makeBifrostError(501, "Embedding not supported for OAuth proxy")
 }
-

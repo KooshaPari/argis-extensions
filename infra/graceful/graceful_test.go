@@ -11,12 +11,10 @@ import (
 	"github.com/kooshapari/bifrost-extensions/infra/circuitbreaker"
 )
 
-// mockPlugin is a test plugin implementation
 type mockPlugin struct {
-	name            string
-	preHookErr      error
-	postHookErr     error
-	transportErr    error
+	name               string
+	preHookErr         error
+	postHookErr        error
 	shouldShortCircuit bool
 }
 
@@ -24,39 +22,38 @@ func (m *mockPlugin) GetName() string {
 	return m.name
 }
 
-func (m *mockPlugin) TransportInterceptor(
-	ctx *context.Context,
-	url string,
-	headers map[string]string,
-	body map[string]any,
-) (map[string]string, map[string]any, error) {
-	return headers, body, m.transportErr
+func (m *mockPlugin) PreRequestHook(_ *schemas.BifrostContext, _ *schemas.BifrostRequest) error {
+	return nil
 }
 
-func (m *mockPlugin) PreHook(
-	ctx *context.Context,
+func (m *mockPlugin) PreLLMHook(
+	_ *schemas.BifrostContext,
 	req *schemas.BifrostRequest,
-) (*schemas.BifrostRequest, *schemas.PluginShortCircuit, error) {
+) (*schemas.BifrostRequest, *schemas.LLMPluginShortCircuit, error) {
 	if m.shouldShortCircuit {
-		return req, &schemas.PluginShortCircuit{}, nil
+		return req, &schemas.LLMPluginShortCircuit{}, nil
 	}
 	return req, nil, m.preHookErr
 }
 
-func (m *mockPlugin) PostHook(
-	ctx *context.Context,
+func (m *mockPlugin) PostLLMHook(
+	_ *schemas.BifrostContext,
 	resp *schemas.BifrostResponse,
-	err *schemas.BifrostError,
+	bifrostErr *schemas.BifrostError,
 ) (*schemas.BifrostResponse, *schemas.BifrostError, error) {
-	return resp, err, m.postHookErr
+	return resp, bifrostErr, m.postHookErr
 }
 
 func (m *mockPlugin) Cleanup() error {
 	return nil
 }
 
+func testContext() *schemas.BifrostContext {
+	return schemas.NewBifrostContext(context.Background(), schemas.NoDeadline)
+}
+
 func TestPluginManager_GetPlugins(t *testing.T) {
-	plugins := []schemas.Plugin{
+	plugins := []schemas.LLMPlugin{
 		&mockPlugin{name: "plugin1"},
 		&mockPlugin{name: "plugin2"},
 	}
@@ -70,16 +67,15 @@ func TestPluginManager_GetPlugins(t *testing.T) {
 }
 
 func TestPluginManager_ExecutePreHooks_Success(t *testing.T) {
-	plugins := []schemas.Plugin{
+	plugins := []schemas.LLMPlugin{
 		&mockPlugin{name: "plugin1"},
 		&mockPlugin{name: "plugin2"},
 	}
 
 	manager := NewPluginManager(plugins, DefaultConfig(), nil)
-	ctx := context.Background()
 	req := &schemas.BifrostRequest{}
 
-	resultReq, _, err := manager.ExecutePreHooks(ctx, req)
+	resultReq, _, err := manager.ExecutePreLLMHooks(testContext(), req)
 
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
@@ -91,33 +87,30 @@ func TestPluginManager_ExecutePreHooks_Success(t *testing.T) {
 }
 
 func TestPluginManager_ExecutePreHooks_WithFailure(t *testing.T) {
-	plugins := []schemas.Plugin{
+	plugins := []schemas.LLMPlugin{
 		&mockPlugin{name: "plugin1"},
 		&mockPlugin{name: "plugin2", preHookErr: errors.New("plugin error")},
 		&mockPlugin{name: "plugin3"},
 	}
 
 	config := DefaultConfig()
-	config.FailFast = false // Graceful degradation
+	config.FailFast = false
 	manager := NewPluginManager(plugins, config, nil)
-	ctx := context.Background()
 	req := &schemas.BifrostRequest{}
 
-	resultReq, _, err := manager.ExecutePreHooks(ctx, req)
+	resultReq, _, err := manager.ExecutePreLLMHooks(testContext(), req)
 
-	// Should continue despite error (graceful degradation)
 	if resultReq == nil {
 		t.Error("Expected non-nil request even with plugin failure")
 	}
 
-	// Error should be logged but not returned (graceful degradation)
 	if err != nil {
 		t.Logf("Error logged (expected): %v", err)
 	}
 }
 
 func TestPluginManager_ExecutePreHooks_FailFast(t *testing.T) {
-	plugins := []schemas.Plugin{
+	plugins := []schemas.LLMPlugin{
 		&mockPlugin{name: "plugin1"},
 		&mockPlugin{name: "plugin2", preHookErr: errors.New("plugin error")},
 	}
@@ -125,39 +118,30 @@ func TestPluginManager_ExecutePreHooks_FailFast(t *testing.T) {
 	config := DefaultConfig()
 	config.FailFast = true
 	manager := NewPluginManager(plugins, config, nil)
-	ctx := context.Background()
 	req := &schemas.BifrostRequest{}
 
-	_, _, err := manager.ExecutePreHooks(ctx, req)
+	_, _, err := manager.ExecutePreLLMHooks(testContext(), req)
 
-	// With FailFast, the error should propagate
-	// However, the circuit breaker wrapper may swallow it for graceful degradation
-	// So we check if error is returned OR if circuit breaker is open
 	if err == nil {
-		// Check if circuit breaker opened (which is also a form of failure)
 		cb := manager.GetCircuitBreaker("plugin2")
 		if cb != nil && cb.State() == circuitbreaker.StateClosed {
 			t.Error("Expected error with FailFast enabled, or circuit breaker to be open")
 		}
-	} else {
-		// Error was returned - that's what we want
-		if !strings.Contains(err.Error(), "plugin2") {
-			t.Errorf("Expected error to mention plugin2, got: %v", err)
-		}
+	} else if !strings.Contains(err.Error(), "plugin2") {
+		t.Errorf("Expected error to mention plugin2, got: %v", err)
 	}
 }
 
 func TestPluginManager_ExecutePostHooks_Success(t *testing.T) {
-	plugins := []schemas.Plugin{
+	plugins := []schemas.LLMPlugin{
 		&mockPlugin{name: "plugin1"},
 		&mockPlugin{name: "plugin2"},
 	}
 
 	manager := NewPluginManager(plugins, DefaultConfig(), nil)
-	ctx := context.Background()
 	resp := &schemas.BifrostResponse{}
 
-	resultResp, _, err := manager.ExecutePostHooks(ctx, resp, nil)
+	resultResp, _, err := manager.ExecutePostLLMHooks(testContext(), resp, nil)
 
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
@@ -169,28 +153,26 @@ func TestPluginManager_ExecutePostHooks_Success(t *testing.T) {
 }
 
 func TestPluginManager_ExecutePostHooks_WithFailure(t *testing.T) {
-	plugins := []schemas.Plugin{
+	plugins := []schemas.LLMPlugin{
 		&mockPlugin{name: "plugin1"},
 		&mockPlugin{name: "plugin2", postHookErr: errors.New("plugin error")},
 		&mockPlugin{name: "plugin3"},
 	}
 
 	config := DefaultConfig()
-	config.FailFast = false // Graceful degradation
+	config.FailFast = false
 	manager := NewPluginManager(plugins, config, nil)
-	ctx := context.Background()
 	resp := &schemas.BifrostResponse{}
 
-	resultResp, _, _ := manager.ExecutePostHooks(ctx, resp, nil)
+	resultResp, _, _ := manager.ExecutePostLLMHooks(testContext(), resp, nil)
 
-	// Should continue despite error (graceful degradation)
 	if resultResp == nil {
 		t.Error("Expected non-nil response even with plugin failure")
 	}
 }
 
 func TestPluginManager_GetCircuitBreakerStats(t *testing.T) {
-	plugins := []schemas.Plugin{
+	plugins := []schemas.LLMPlugin{
 		&mockPlugin{name: "plugin1"},
 		&mockPlugin{name: "plugin2"},
 	}
@@ -210,19 +192,17 @@ func TestPluginManager_GetCircuitBreakerStats(t *testing.T) {
 }
 
 func TestPluginManager_ResetCircuitBreaker(t *testing.T) {
-	plugins := []schemas.Plugin{
+	plugins := []schemas.LLMPlugin{
 		&mockPlugin{name: "plugin1"},
 	}
 
 	manager := NewPluginManager(plugins, DefaultConfig(), nil)
 
-	// Get circuit breaker and open it
 	cb := manager.GetCircuitBreaker("plugin1")
 	if cb == nil {
 		t.Fatal("Expected circuit breaker for plugin1")
 	}
 
-	// Open circuit by recording failures
 	for i := 0; i < 5; i++ {
 		cb.RecordResult(false)
 	}
@@ -231,7 +211,6 @@ func TestPluginManager_ResetCircuitBreaker(t *testing.T) {
 		t.Error("Expected circuit to be open")
 	}
 
-	// Reset
 	manager.ResetCircuitBreaker("plugin1")
 
 	if cb.State() != circuitbreaker.StateClosed {
@@ -240,14 +219,13 @@ func TestPluginManager_ResetCircuitBreaker(t *testing.T) {
 }
 
 func TestPluginManager_ResetAllCircuitBreakers(t *testing.T) {
-	plugins := []schemas.Plugin{
+	plugins := []schemas.LLMPlugin{
 		&mockPlugin{name: "plugin1"},
 		&mockPlugin{name: "plugin2"},
 	}
 
 	manager := NewPluginManager(plugins, DefaultConfig(), nil)
 
-	// Open all circuits
 	for _, plugin := range plugins {
 		cb := manager.GetCircuitBreaker(plugin.GetName())
 		for i := 0; i < 5; i++ {
@@ -255,10 +233,8 @@ func TestPluginManager_ResetAllCircuitBreakers(t *testing.T) {
 		}
 	}
 
-	// Reset all
 	manager.ResetAllCircuitBreakers()
 
-	// Verify all are closed
 	for _, plugin := range plugins {
 		cb := manager.GetCircuitBreaker(plugin.GetName())
 		if cb.State() != circuitbreaker.StateClosed {

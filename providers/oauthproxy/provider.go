@@ -125,8 +125,9 @@ func (p *Provider) ChatCompletion(
 func makeBifrostError(statusCode int, message string) *schemas.BifrostError {
 	return &schemas.BifrostError{
 		StatusCode: ptrInt(statusCode),
-		Message:    message,
-		Code:       statusCode,
+		Error: &schemas.ErrorField{
+			Message: message,
+		},
 	}
 }
 
@@ -159,23 +160,21 @@ func (p *Provider) convertToOpenAIRequest(req *schemas.BifrostRequest) *OpenAIRe
 	if req.ChatRequest != nil {
 		model = req.ChatRequest.Model
 
-		// Extract parameters if available from BifrostRequest.Params
-		if req.Params != nil {
-			if maxTokensVal, ok := req.Params["max_tokens"].(float64); ok {
-				maxTokens = int(maxTokensVal)
+		if req.ChatRequest.Params != nil {
+			if req.ChatRequest.Params.MaxCompletionTokens != nil {
+				maxTokens = *req.ChatRequest.Params.MaxCompletionTokens
 			}
-			if tempVal, ok := req.Params["temperature"].(float64); ok {
-				temperature = tempVal
+			if req.ChatRequest.Params.Temperature != nil {
+				temperature = *req.ChatRequest.Params.Temperature
 			}
 		}
 
-		// Convert messages - use Messages field
-		if len(req.ChatRequest.Messages) > 0 {
-			messages = make([]OpenAIMessage, 0, len(req.ChatRequest.Messages))
-			for _, msg := range req.ChatRequest.Messages {
+		if len(req.ChatRequest.Input) > 0 {
+			messages = make([]OpenAIMessage, 0, len(req.ChatRequest.Input))
+			for _, msg := range req.ChatRequest.Input {
 				messages = append(messages, OpenAIMessage{
-					Role:    msg.Role,
-					Content: msg.Content,
+					Role:    string(msg.Role),
+					Content: chatMessageContentString(msg.Content),
 				})
 			}
 		}

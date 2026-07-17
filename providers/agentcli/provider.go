@@ -112,11 +112,11 @@ func (p *Provider) ChatCompletion(
 ) (*schemas.BifrostResponse, *schemas.BifrostError) {
 	// Extract the last user message from chat request
 	var userMessage string
-	if req.ChatRequest != nil && len(req.ChatRequest.Messages) > 0 {
-		for i := len(req.ChatRequest.Messages) - 1; i >= 0; i-- {
-			msg := req.ChatRequest.Messages[i]
-			if msg.Role == "user" {
-				userMessage = msg.Content
+	if req.ChatRequest != nil && len(req.ChatRequest.Input) > 0 {
+		for i := len(req.ChatRequest.Input) - 1; i >= 0; i-- {
+			msg := req.ChatRequest.Input[i]
+			if msg.Role == schemas.ChatMessageRoleUser {
+				userMessage = chatMessageContentString(msg.Content)
 				break
 			}
 		}
@@ -149,19 +149,23 @@ func (p *Provider) ChatCompletion(
 	}
 
 	finishReason := "stop"
+	content := response
 	return &schemas.BifrostResponse{
-		ChatResponse: &schemas.ChatResponse{
+		ChatResponse: &schemas.BifrostChatResponse{
 			ID:      fmt.Sprintf("agentcli-%d", time.Now().UnixNano()),
 			Model:   string(p.config.AgentType),
-			Created: time.Now().Unix(),
+			Created: int(time.Now().Unix()),
 			Object:  "chat.completion",
-			Choices: []schemas.ChatResponseChoice{
+			Choices: []schemas.BifrostResponseChoice{
 				{
 					Index:        0,
-					FinishReason: finishReason,
-					Message: schemas.ChatMessage{
-						Role:    "assistant",
-						Content: response,
+					FinishReason: &finishReason,
+					ChatNonStreamResponseChoice: &schemas.ChatNonStreamResponseChoice{
+						Message: &schemas.ChatMessage{
+							Role:    schemas.ChatMessageRoleAssistant,
+							Content: &schemas.ChatMessageContent{ContentStr: &content},
+						},
+						StopString: &finishReason,
 					},
 				},
 			},
@@ -169,12 +173,20 @@ func (p *Provider) ChatCompletion(
 	}, nil
 }
 
+func chatMessageContentString(content *schemas.ChatMessageContent) string {
+	if content == nil || content.ContentStr == nil {
+		return ""
+	}
+	return *content.ContentStr
+}
+
 // makeBifrostError creates a properly structured BifrostError
 func makeBifrostError(statusCode int, message string) *schemas.BifrostError {
 	return &schemas.BifrostError{
 		StatusCode: ptrInt(statusCode),
-		Message:    message,
-		Code:       statusCode,
+		Error: &schemas.ErrorField{
+			Message: message,
+		},
 	}
 }
 

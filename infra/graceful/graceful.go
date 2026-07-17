@@ -2,7 +2,6 @@
 package graceful
 
 import (
-	"context"
 	"fmt"
 	"sync"
 
@@ -13,8 +12,8 @@ import (
 
 // PluginManager manages plugins with graceful degradation
 type PluginManager struct {
-	plugins         []schemas.Plugin
-	wrappedPlugins  []schemas.Plugin
+	plugins         []schemas.LLMPlugin
+	wrappedPlugins  []schemas.LLMPlugin
 	circuitBreakers map[string]*circuitbreaker.CircuitBreaker
 	config          *Config
 	mu              sync.RWMutex
@@ -39,15 +38,13 @@ func DefaultConfig() *Config {
 }
 
 // NewPluginManager creates a new plugin manager with graceful degradation
-func NewPluginManager(plugins []schemas.Plugin, config *Config, logger schemas.Logger) *PluginManager {
+func NewPluginManager(plugins []schemas.LLMPlugin, config *Config, logger schemas.Logger) *PluginManager {
 	if config == nil {
 		config = DefaultConfig()
 	}
 
-	// Wrap plugins with circuit breakers
 	wrapped := circuitbreaker.WrapPlugins(plugins, config.CircuitBreakerConfig)
 
-	// Build circuit breaker map
 	breakers := make(map[string]*circuitbreaker.CircuitBreaker)
 	for i, plugin := range plugins {
 		wrapper, ok := wrapped[i].(*circuitbreaker.PluginWrapper)
@@ -58,7 +55,7 @@ func NewPluginManager(plugins []schemas.Plugin, config *Config, logger schemas.L
 
 	return &PluginManager{
 		plugins:         plugins,
-		wrappedPlugins: wrapped,
+		wrappedPlugins:  wrapped,
 		circuitBreakers: breakers,
 		config:          config,
 		logger:          logger,
@@ -66,90 +63,93 @@ func NewPluginManager(plugins []schemas.Plugin, config *Config, logger schemas.L
 }
 
 // GetPlugins returns the wrapped plugins with circuit breaker protection
-func (pm *PluginManager) GetPlugins() []schemas.Plugin {
+func (pm *PluginManager) GetPlugins() []schemas.LLMPlugin {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	return pm.wrappedPlugins
 }
 
-// ExecutePreHooks executes all plugin PreHooks with graceful degradation
-func (pm *PluginManager) ExecutePreHooks(
-	ctx context.Context,
+// ExecutePreLLMHooks executes all plugin PreLLMHooks with graceful degradation
+func (pm *PluginManager) ExecutePreLLMHooks(
+	ctx *schemas.BifrostContext,
 	req *schemas.BifrostRequest,
-) (*schemas.BifrostRequest, *schemas.PluginShortCircuit, error) {
+) (*schemas.BifrostRequest, *schemas.LLMPluginShortCircuit, error) {
 	pm.mu.RLock()
 	plugins := pm.wrappedPlugins
 	pm.mu.RUnlock()
 
-	var lastReq = req
-	var lastShortCircuit *schemas.PluginShortCircuit
+	lastReq := req
+	var lastShortCircuit *schemas.LLMPluginShortCircuit
 	var lastErr error
 
 	for _, plugin := range plugins {
-		pluginReq, shortCircuit, err := plugin.PreHook(ctx, lastReq)
-
-		if err != nil {
+		if err := plugin.PreRequestHook(ctx, lastReq); err != nil {
 			if pm.logger != nil {
-				pm.logger.Warn("Plugin PreHook failed",
+				pm.logger.Warn("Plugin PreRequestHook failed",
 					"plugin", plugin.GetName(),
 					"error", err.Error(),
 				)
 			}
-
 			if pm.config != nil && pm.config.FailFast {
-				return nil, nil, fmt.Errorf("plugin %s PreHook failed: %w", plugin.GetName(), err)
+				return nil, nil, fmt.Errorf("plugin %s PreRequestHook failed: %w", plugin.GetName(), err)
 			}
+			lastErr = err
+		}
 
-			// Continue with previous request (graceful degradation)
+		pluginReq, shortCircuit, err := plugin.PreLLMHook(ctx, lastReq)
+		if err != nil {
+			if pm.logger != nil {
+				pm.logger.Warn("Plugin PreLLMHook failed",
+					"plugin", plugin.GetName(),
+					"error", err.Error(),
+				)
+			}
+			if pm.config != nil && pm.config.FailFast {
+				return nil, nil, fmt.Errorf("plugin %s PreLLMHook failed: %w", plugin.GetName(), err)
+			}
 			lastErr = err
 			continue
 		}
 
-		// Check for short circuit
 		if shortCircuit != nil {
 			lastShortCircuit = shortCircuit
-			// Continue to allow other plugins to process
 		}
-
-		lastReq = pluginReq
+		if pluginReq != nil {
+			lastReq = pluginReq
+		}
 	}
 
 	return lastReq, lastShortCircuit, lastErr
 }
 
-// ExecutePostHooks executes all plugin PostHooks with graceful degradation
-// ExecutePostHooks executes all plugin PostHooks with graceful degradation
-func (pm *PluginManager) ExecutePostHooks(
-	ctx context.Context,
+// ExecutePostLLMHooks executes all plugin PostLLMHooks with graceful degradation
+func (pm *PluginManager) ExecutePostLLMHooks(
+	ctx *schemas.BifrostContext,
 	resp *schemas.BifrostResponse,
+	bifrostErr *schemas.BifrostError,
 ) (*schemas.BifrostResponse, *schemas.BifrostError, error) {
 	pm.mu.RLock()
 	plugins := pm.wrappedPlugins
 	pm.mu.RUnlock()
 
-	var lastResp = resp
+	lastResp := resp
 	var lastErr *schemas.BifrostError
 	var lastHookErr error
 
 	for _, plugin := range plugins {
-		pluginResp, pluginErr, hookErr := plugin.PostHook(ctx, lastResp)
-
+		pluginResp, pluginErr, hookErr := plugin.PostLLMHook(ctx, lastResp, bifrostErr)
 		if hookErr != nil {
 			if pm.logger != nil {
-				pm.logger.Warn("Plugin PostHook failed",
+				pm.logger.Warn("Plugin PostLLMHook failed",
 					"plugin", plugin.GetName(),
 					"error", hookErr.Error(),
 				)
 			}
-
 			if pm.config != nil && pm.config.FailFast {
-				return nil, nil, fmt.Errorf("plugin %s PostHook failed: %w", plugin.GetName(), hookErr)
+				return nil, nil, fmt.Errorf("plugin %s PostLLMHook failed: %w", plugin.GetName(), hookErr)
 			}
-
-			// Continue with previous response (graceful degradation)
 			lastHookErr = hookErr
 		}
-
 		if pluginResp != nil {
 			lastResp = pluginResp
 		}

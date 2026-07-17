@@ -86,23 +86,18 @@ func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
 
 // writeSSEError writes an error as SSE
 func (s *Server) writeSSEError(w http.ResponseWriter, flusher http.Flusher, err *schemas.BifrostError) {
-	msg := "Internal error"
-	if err != nil {
-		msg = err.Message
-	}
-	fmt.Fprintf(w, "data: {\"error\":{\"message\":\"%s\"}}\n\n", msg)
+	fmt.Fprintf(w, "data: {\"error\":{\"message\":\"%s\"}}\n\n", bifrostErrorMessage(err))
 	flusher.Flush()
 }
 
 // writeSSEChatResponse writes a chat response as SSE
-func (s *Server) writeSSEChatResponse(w http.ResponseWriter, flusher http.Flusher, resp *schemas.ChatResponse, model string) {
+func (s *Server) writeSSEChatResponse(w http.ResponseWriter, flusher http.Flusher, resp *schemas.BifrostChatResponse, model string) {
 	if resp == nil {
 		return
 	}
 
-	// Send content chunks
 	for _, choice := range resp.Choices {
-		content := choice.Message.Content
+		role, content := choiceAssistantContent(choice)
 
 		chunk := map[string]interface{}{
 			"id":      resp.ID,
@@ -113,7 +108,7 @@ func (s *Server) writeSSEChatResponse(w http.ResponseWriter, flusher http.Flushe
 				{
 					"index": choice.Index,
 					"delta": map[string]string{
-						"role":    "assistant",
+						"role":    role,
 						"content": content,
 					},
 					"finish_reason": nil,
@@ -128,51 +123,13 @@ func (s *Server) writeSSEChatResponse(w http.ResponseWriter, flusher http.Flushe
 }
 
 // convertToChatRequest converts OpenAI request to Bifrost chat request
-func (s *Server) convertToChatRequest(req *ChatCompletionRequest) *schemas.ChatRequest {
-	messages := make([]schemas.ChatMessage, 0, len(req.Messages))
-	for _, msg := range req.Messages {
-		messages = append(messages, schemas.ChatMessage{
-			Role:    msg.Role,
-			Content: msg.Content,
-		})
-	}
-
-	return &schemas.ChatRequest{
-		Messages:  messages,
-		Model:    req.Model,
-		MaxTokens: 0,
-	}
+func (s *Server) convertToChatRequest(req *ChatCompletionRequest) *schemas.BifrostChatRequest {
+	return s.convertToBifrostChatRequest(req)
 }
 
 // convertFromChatResponse converts Bifrost response to OpenAI response
-func (s *Server) convertFromChatResponse(resp *schemas.ChatResponse, model string) *ChatCompletionResponse {
-	if resp == nil {
-		return nil
-	}
-
-	choices := make([]ChatCompletionChoice, 0, len(resp.Choices))
-	for _, choice := range resp.Choices {
-		finishReason := choice.FinishReason
-		c := ChatCompletionChoice{
-			Index:        choice.Index,
-			FinishReason: &finishReason,
-		}
-
-		c.Message = &ChatMessage{
-			Role:    choice.Message.Role,
-			Content: choice.Message.Content,
-		}
-
-		choices = append(choices, c)
-	}
-
-	return &ChatCompletionResponse{
-		ID:      resp.ID,
-		Object:  "chat.completion",
-		Created: int64(resp.Created),
-		Model:   model,
-		Choices: choices,
-	}
+func (s *Server) convertFromChatResponse(resp *schemas.BifrostChatResponse, model string) *ChatCompletionResponse {
+	return s.convertToOpenAIChatResponse(resp, model)
 }
 
 // Start starts the HTTP server
