@@ -129,6 +129,10 @@
 | SLICE-32 | meta_alerts_fired_by_target_total counter (per-target breakdown) | `1d6f373` | DONE | MetaAlertByTargetLabels {target, severity}; useful for "which target fires most" dashboards |
 | SLICE-33 | request-scoped tracing spans via tower-http::trace | `64f7da6` | DONE | TraceLayer::new_for_http() on axum Router; INFO make_span + DEBUG on_request + INFO on_response; per-request span name = `http_request` |
 | SLICE-203 | rebase + verify PR #203 (slice 13 wire bifrost-ffi) onto main | `7eb6d17` | DONE | merge origin/main; cargo check + cargo test green (48 lib + 19 contract + 1 doctest = 68 PASS); force-pushed |
+| SLICE-200 | rebase + verify PR #200 (slice 10c hot-reload SIGHUP stub) onto main | `4dabb35` | DONE | merge origin/main; 48 lib + 17 contract + 1 doctest = 66 PASS; force-pushed |
+| SLICE-199 | rebase + verify PR #199 (slice 10a refinery schema migrations) onto main | `d587f72` | DONE | merge origin/main; 48 lib + 17 contract + 1 doctest = 66 PASS; force-pushed |
+| SLICE-198 | rebase + verify PR #198 (slice 10b alert history prune CLI) onto main | `5d8d4f1` | DONE | merge origin/main; 48 lib + 17 contract + 1 doctest = 66 PASS; force-pushed |
+| SLICE-26-NOTE | (duplicate-decomp note) | - | DONE | alerts.rs decomposition was already shipped as slice 26 on PR #209 (commit d7f10b7); 34 LOC + 7 submodules (largest 112) |
 
 ## Phase 8 - Planned (slices 31+)
 
