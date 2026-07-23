@@ -11,7 +11,8 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::ge
 use prometheus_client::encoding::text::encode;
 use prometheus_client::registry::Registry;
 use tokio::sync::watch;
-use tracing::{error, info};
+use tower_http::trace::{DefaultMakeSpan, DefaultOnRequest, DefaultOnResponse, TraceLayer};
+use tracing::{error, info, Level};
 
 /// Handle to the running exporter.
 #[derive(Clone)]
@@ -26,12 +27,25 @@ struct AppState {
 }
 
 /// Spawn the exporter. Resolves once the server is listening.
+///
+/// Slice 33: every incoming HTTP request gets a tracing span
+/// (method, uri, status, latency). We use `tower_http::trace::TraceLayer` with
+/// default hooks at INFO; the span name is `http_request`. Operators can
+/// adjust the level via `RUST_LOG` (e.g. `RUST_LOG=argis_monitor::exporter=debug`).
 pub async fn serve(addr: &str, registry: Arc<Registry>) -> anyhow::Result<ExporterHandle> {
     let state = AppState { registry };
     let app = Router::new()
         .route("/metrics", get(metrics_handler))
         .route("/healthz", get(healthz))
-        .with_state(state);
+        .with_state(state)
+        // TraceLayer must be the outermost layer so it captures the final
+        // status + latency after the inner handlers run.
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(DefaultMakeSpan::new().level(Level::INFO).include_headers(false))
+                .on_request(DefaultOnRequest::new().level(Level::DEBUG))
+                .on_response(DefaultOnResponse::new().level(Level::INFO).include_headers(false)),
+        );
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let local_addr = listener.local_addr()?;
