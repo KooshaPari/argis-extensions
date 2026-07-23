@@ -127,6 +127,8 @@
 | SLICE-29 | Prometheus `argis_monitor_meta_alerts_active` gauge | `8ddbf45` | DONE | flips 0/1 per rule on every evaluate_meta_alerts call |
 | SLICE-30 | structured JSON error envelope for exporter | `8ddbf45` | DONE | per AGENTS.md sec 11 security pattern; no raw err.stack in body |
 | SLICE-32 | meta_alerts_fired_by_target_total counter (per-target breakdown) | `1d6f373` | DONE | MetaAlertByTargetLabels {target, severity}; useful for "which target fires most" dashboards |
+| SLICE-33 | request-scoped tracing spans via tower-http::trace | `64f7da6` | DONE | TraceLayer::new_for_http() on axum Router; INFO make_span + DEBUG on_request + INFO on_response; per-request span name = `http_request` |
+| SLICE-203 | rebase + verify PR #203 (slice 13 wire bifrost-ffi) onto main | `7eb6d17` | DONE | merge origin/main; cargo check + cargo test green (48 lib + 19 contract + 1 doctest = 68 PASS); force-pushed |
 
 ## Phase 8 - Planned (slices 31+)
 

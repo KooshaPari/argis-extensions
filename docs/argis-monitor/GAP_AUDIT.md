@@ -78,6 +78,7 @@ Snapshot from `wc -l argis-monitor/src/*.rs` on the merge queue base
 | GAP-H11 | P2 | meta-alert Prometheus had no active-state gauge | PR #209 SLICE-29 (commit `8ddbf45`) |
 | GAP-H12 | P2 | exporter returned raw err.message on encode failure | PR #209 SLICE-30 (commit `8ddbf45`) - structured JSON envelope |
 | GAP-H13 | P2 | meta-alert counter had no per-target breakdown | PR #209 SLICE-32 (commit `1d6f373`) |
+| GAP-H14 | P2 | no per-request tracing spans on the axum exporter | PR #209 SLICE-33 (commit `64f7da6`) - tower-http::trace |
 
 ## Cross-cutting compliance check
 
