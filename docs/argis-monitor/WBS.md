@@ -137,6 +137,11 @@
 | SLICE-195 | rebase + verify PR #195 (slice 8 alert suppression windows) onto main | `7523800` | DONE | merge origin/main; 42 lib + 16 contract + 1 doctest = 59 PASS; force-pushed |
 | SLICE-192 | rebase + verify PR #192 (slice 7 alert history log) onto main | `e6d8cae` | DONE | merge origin/main; 34 lib + 14 contract + 1 doctest = 49 PASS; force-pushed |
 | SLICE-191 | rebase + verify PR #191 (slice 6 Pushgateway exporter) onto main | `9018949` | DONE | merge origin/main; 30 lib + 14 contract + 1 doctest = 45 PASS; force-pushed |
+| SLICE-190 | rebase + verify PR #190 (slice 5 SQLite state persist) onto main | `bb0fcb9` | DONE | merge origin/main; 28 lib + 14 contract + 1 doctest = 43 PASS; force-pushed |
+| SLICE-189 | rebase + verify PR #189 (slice 4 Grafana dashboard JSON) onto main | `85208aa` | DONE | merge origin/main; 21 lib + 14 contract + 1 doctest = 36 PASS; force-pushed |
+| SLICE-188 | rebase + verify PR #188 (slice 3 alert rules + webhook delivery) onto main | `6062d1d` | DONE | merge origin/main; 20 lib + 13 contract + 1 doctest = 34 PASS; force-pushed |
+| SLICE-187 | rebase + verify PR #187 (slice 2 multi-target + ring buffer) onto main | `b251427` | DONE | merge origin/main; 13 lib + 9 contract + 1 doctest = 23 PASS; force-pushed |
+| SLICE-185 | rebase + verify PR #185 (slice 1 substrate) onto main | `c025d8b` | DONE | merge origin/main; 6 lib + 5 contract + 1 doctest = 12 PASS; force-pushed |
 | SLICE-26-NOTE | (duplicate-decomp note) | - | DONE | alerts.rs decomposition was already shipped as slice 26 on PR #209 (commit d7f10b7); 34 LOC + 7 submodules (largest 112) |
 
 ## Phase 8 - Planned (slices 31+)
