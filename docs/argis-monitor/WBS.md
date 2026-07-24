@@ -132,6 +132,11 @@
 | SLICE-200 | rebase + verify PR #200 (slice 10c hot-reload SIGHUP stub) onto main | `4dabb35` | DONE | merge origin/main; 48 lib + 17 contract + 1 doctest = 66 PASS; force-pushed |
 | SLICE-199 | rebase + verify PR #199 (slice 10a refinery schema migrations) onto main | `d587f72` | DONE | merge origin/main; 48 lib + 17 contract + 1 doctest = 66 PASS; force-pushed |
 | SLICE-198 | rebase + verify PR #198 (slice 10b alert history prune CLI) onto main | `5d8d4f1` | DONE | merge origin/main; 48 lib + 17 contract + 1 doctest = 66 PASS; force-pushed |
+| SLICE-197 | rebase + verify PR #197 (slice 10d JWT bearer auth) onto main | `e55f6e5` | DONE | merge origin/main; 48 lib + 19 contract + 1 doctest = 68 PASS; force-pushed |
+| SLICE-196 | rebase + verify PR #196 (slice 9 AWS SigV4 webhook signing) onto main | `db43754` | DONE | merge origin/main; 49 lib + 16 contract + 1 doctest = 66 PASS; force-pushed |
+| SLICE-195 | rebase + verify PR #195 (slice 8 alert suppression windows) onto main | `7523800` | DONE | merge origin/main; 42 lib + 16 contract + 1 doctest = 59 PASS; force-pushed |
+| SLICE-192 | rebase + verify PR #192 (slice 7 alert history log) onto main | `e6d8cae` | DONE | merge origin/main; 34 lib + 14 contract + 1 doctest = 49 PASS; force-pushed |
+| SLICE-191 | rebase + verify PR #191 (slice 6 Pushgateway exporter) onto main | `9018949` | DONE | merge origin/main; 30 lib + 14 contract + 1 doctest = 45 PASS; force-pushed |
 | SLICE-26-NOTE | (duplicate-decomp note) | - | DONE | alerts.rs decomposition was already shipped as slice 26 on PR #209 (commit d7f10b7); 34 LOC + 7 submodules (largest 112) |
 
 ## Phase 8 - Planned (slices 31+)
