@@ -33,12 +33,20 @@ pub enum PushError {
 
 /// Push the registry's contents to `url`. Returns the HTTP status on success.
 pub async fn push_to(url: &str, registry: &Registry) -> Result<u16, PushError> {
-    let mut buf = String::new();
-    encode(&mut buf, registry).map_err(|e| PushError::InvalidUrl(e.to_string()))?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
         .map_err(PushError::Transport)?;
+    push_to_with_client(url, registry, &client).await
+}
+
+async fn push_to_with_client(
+    url: &str,
+    registry: &Registry,
+    client: &reqwest::Client,
+) -> Result<u16, PushError> {
+    let mut buf = String::new();
+    encode(&mut buf, registry).map_err(|e| PushError::InvalidUrl(e.to_string()))?;
     let resp = client
         .post(url)
         .header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -63,6 +71,16 @@ pub async fn run_pusher(
     instance_label: String,
 ) {
     info!(%url, interval_secs = interval.as_secs(), %job_name, %instance_label, "argis-monitor pusher starting");
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            error!(%error, "failed to build Pushgateway HTTP client");
+            return;
+        }
+    };
     let mut ticker = tokio::time::interval(interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Pushgateway URL format: {base}/metrics/job/{job}/instance/{instance}
@@ -74,7 +92,7 @@ pub async fn run_pusher(
     );
     loop {
         ticker.tick().await;
-        match push_to(&push_url, &registry).await {
+        match push_to_with_client(&push_url, &registry, &client).await {
             Ok(status) => info!(%push_url, status, "pushed"),
             Err(e) => warn!(error = %e, %push_url, "push failed; will retry next tick"),
         }

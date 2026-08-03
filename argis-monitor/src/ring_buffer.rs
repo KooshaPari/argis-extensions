@@ -8,6 +8,7 @@
 //! for the in-process substrate; if memory ever becomes a concern, swap
 //! to compressed bitmaps (see docs/SLO_SPEC.md).
 
+use std::collections::VecDeque;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -23,7 +24,7 @@ impl Bucket {
 /// A fixed-size ring of buckets, one per `bucket_size_secs`. The ring advances
 /// automatically on `record()` based on the wall-clock timestamp.
 pub struct RingBuffer {
-    buckets: Vec<Bucket>,
+    buckets: VecDeque<Bucket>,
     bucket_size_secs: u64,
     /// The unix-second timestamp of the most recent bucket boundary.
     head_ts: u64,
@@ -43,7 +44,7 @@ impl RingBuffer {
         assert!(bucket_size_secs > 0, "bucket_size_secs must be > 0");
         let n_buckets = (total_window_secs / bucket_size_secs).max(1) as usize;
         Self {
-            buckets: vec![Bucket::default(); n_buckets],
+            buckets: vec![Bucket::default(); n_buckets].into(),
             bucket_size_secs,
             head_ts: Self::boundary_for(bucket_size_secs, now_secs),
         }
@@ -62,7 +63,7 @@ impl RingBuffer {
     /// Record a single outcome, advancing the ring if the wall clock has moved.
     pub fn record(&mut self, success: bool, now_secs: u64) {
         self.advance(now_secs);
-        let last = self.buckets.last_mut().expect("ring is non-empty by construction");
+        let last = self.buckets.back_mut().expect("ring is non-empty by construction");
         if success { last.success += 1; } else { last.failure += 1; }
     }
 
@@ -95,11 +96,10 @@ impl RingBuffer {
         let step = (stride / self.bucket_size_secs).min(n);
         for _ in 0..step {
             // Rotate left by one bucket.
-            let first = self.buckets.remove(0);
-            self.buckets.push(Bucket { success: 0, failure: 0 });
-            // We discard `first` (out of window). For very long strides this
+            self.buckets.pop_front();
+            self.buckets.push_back(Bucket::default());
+            // We discard the oldest bucket (out of window). For very long strides this
             // silently drops history; that's the desired behaviour for a ring.
-            let _ = first;
         }
         self.head_ts = target;
     }

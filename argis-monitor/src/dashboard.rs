@@ -25,7 +25,9 @@ const KNOWN_METRICS: &[&str] = &[
     "argis_monitor_target_info",
 ];
 
-/// Load + validate the dashboard JSON at `path`. Returns a summary.
+/// Load the dashboard JSON at `path` and collect referenced metrics.
+/// Returns a summary; callers should inspect `referenced_metrics` to
+/// determine whether all known metrics are covered.
 pub fn load_and_summarize(path: &Path) -> anyhow::Result<DashboardSummary> {
     let raw = std::fs::read_to_string(path)?;
     let v: serde_json::Value = serde_json::from_str(&raw)?;

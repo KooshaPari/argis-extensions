@@ -49,9 +49,9 @@ pub fn burn_rate(successes: u64, failures: u64, target: f64) -> f64 {
     error_ratio / allowed_error
 }
 
-/// Multi-window burn. Returns the max burn across both windows — used by
+/// Multi-window burn. Returns `(short, long)` burn rates for use by
 /// the SRE alerting recipe (alert when short_window_burn > 14.4 AND
-/// long_window_burn > 14.4). We return both for richer dashboards.
+/// long_window_burn > 14.4). Both values are returned for richer dashboards.
 pub fn multi_window_burn(
     short_success: u64, short_failure: u64,
     long_success: u64, long_failure: u64,

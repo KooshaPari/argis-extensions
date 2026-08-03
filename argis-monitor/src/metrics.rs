@@ -89,7 +89,7 @@ pub struct Metrics {
     pub up: Family<ProviderLabels, Gauge>,
     pub burn_rate: Family<SloLabels, Gauge>,
     pub slo_target: Family<SloOnlyLabels, Gauge>,
-    pub target_info: Family<InfoLabels, Counter>,
+    pub target_info: Family<InfoLabels, Gauge>,
 }
 
 impl Metrics {
@@ -107,7 +107,7 @@ impl Metrics {
         let up = Family::<ProviderLabels, Gauge>::default();
         let burn_rate = Family::<SloLabels, Gauge>::default();
         let slo_target = Family::<SloOnlyLabels, Gauge>::default();
-        let target_info = Family::<InfoLabels, Counter>::default();
+        let target_info = Family::<InfoLabels, Gauge>::default();
 
         registry.register("argis_monitor_polls_total", "Total polls attempted.", polls_total.clone());
         registry.register("argis_monitor_poll_errors_total", "Total polls that failed.", poll_errors_total.clone());
@@ -128,7 +128,7 @@ impl Metrics {
 
         target_info
             .get_or_create(&InfoLabels { target: target.into(), version: env!("CARGO_PKG_VERSION").into() })
-            .inc();
+            .set(1);
 
         Self { polls_total, poll_errors_total, poll_duration, last_poll_ts, up, burn_rate, slo_target, target_info }
     }

@@ -13,7 +13,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 /// Where to send an alert payload when a rule fires.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct WebhookTarget {
     pub url: String,
     #[serde(default)]
@@ -187,7 +187,6 @@ pub fn evaluate(
     tracker: &mut AlertStateTracker,
 ) -> Decision {
     let resolve = rule.resolve_threshold.unwrap_or(rule.threshold / 2.0);
-    let now_in_state = tracker.sustained_for;
     match tracker.state {
         AlertState::Ok => {
             if burn >= rule.threshold {
@@ -199,14 +198,14 @@ pub fn evaluate(
             }
         }
         AlertState::Pending { since } => {
-            if burn < resolve {
+            if burn < rule.threshold {
                 tracker.state = AlertState::Ok;
                 tracker.sustained_for = Duration::from_secs(0);
                 Decision::None
             } else {
-                // Increment sustained_for; if the new value meets the
-                // `for_secs` threshold, promote to Firing on this same tick.
-                tracker.sustained_for += Duration::from_secs(1);
+                // Use elapsed wall-clock time, not the number of polls. Poll
+                // intervals may be longer than one second or may be skipped.
+                tracker.sustained_for = Duration::from_secs(ts.saturating_sub(since));
                 if tracker.sustained_for >= rule.for_secs {
                     tracker.state = AlertState::Firing { since, last_fired_at: ts };
                     let payload = AlertPayload::firing(&rule.name, target, &rule.slo, burn, rule.threshold, ts);
@@ -249,18 +248,8 @@ mod opt_seconds_as_duration {
         Ok(match opt {
             None | Some(R::N) => None,
             Some(R::S(n)) => Some(Duration::from_secs(n)),
-            Some(R::T(t)) => Some(parse_human(&t).map_err(serde::de::Error::custom)?),
+            Some(R::T(t)) => Some(crate::duration::parse_human(&t).map_err(serde::de::Error::custom)?),
         })
-    }
-    fn parse_human(s: &str) -> Result<Duration, String> {
-        let s = s.trim();
-        let (num, unit) = s.split_at(s.len().saturating_sub(1));
-        let n: u64 = num.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-        let mul = match unit {
-            "s" => 1, "m" => 60, "h" => 3600, "d" => 86_400,
-            _ => return Err(format!("unknown duration unit: {unit}")),
-        };
-        Ok(Duration::from_secs(n * mul))
     }
 }
 
@@ -274,18 +263,8 @@ mod seconds_as_duration {
         enum R { S(u64), T(String) }
         match R::deserialize(d)? {
             R::S(n) => Ok(Duration::from_secs(n)),
-            R::T(t) => parse_human(&t).map_err(serde::de::Error::custom),
+            R::T(t) => crate::duration::parse_human(&t).map_err(serde::de::Error::custom),
         }
-    }
-    fn parse_human(s: &str) -> Result<Duration, String> {
-        let s = s.trim();
-        let (num, unit) = s.split_at(s.len().saturating_sub(1));
-        let n: u64 = num.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-        let mul = match unit {
-            "s" => 1, "m" => 60, "h" => 3600, "d" => 86_400,
-            _ => return Err(format!("unknown duration unit: {unit}")),
-        };
-        Ok(Duration::from_secs(n * mul))
     }
 }
 
@@ -308,6 +287,43 @@ mod tests {
         let d = evaluate(&rule, "gateway", 3.0, 100, &mut t);
         assert_eq!(d, Decision::None);
         assert!(matches!(t.state, AlertState::Pending { .. }));
+    }
+
+    #[test]
+    fn pending_resets_when_burn_drops_below_threshold() {
+        let rule = AlertRule {
+            name: "r".into(),
+            slo: "s".into(),
+            threshold: 2.0,
+            resolve_threshold: Some(1.0),
+            for_secs: Duration::from_secs(30),
+            ..Default::default()
+        };
+        let mut t = AlertStateTracker {
+            state: AlertState::Pending { since: 100 },
+            sustained_for: Duration::from_secs(10),
+        };
+        assert_eq!(evaluate(&rule, "gateway", 1.5, 110, &mut t), Decision::None);
+        assert_eq!(t.state, AlertState::Ok);
+        assert_eq!(t.sustained_for, Duration::ZERO);
+    }
+
+    #[test]
+    fn pending_duration_uses_elapsed_timestamps() {
+        let rule = AlertRule {
+            name: "r".into(),
+            slo: "s".into(),
+            threshold: 2.0,
+            for_secs: Duration::from_secs(10),
+            ..Default::default()
+        };
+        let mut t = AlertStateTracker {
+            state: AlertState::Pending { since: 100 },
+            sustained_for: Duration::ZERO,
+        };
+        assert_eq!(evaluate(&rule, "gateway", 3.0, 105, &mut t), Decision::None);
+        assert_eq!(t.sustained_for, Duration::from_secs(5));
+        assert!(matches!(evaluate(&rule, "gateway", 3.0, 110, &mut t), Decision::Fire(_)));
     }
 
     #[test]

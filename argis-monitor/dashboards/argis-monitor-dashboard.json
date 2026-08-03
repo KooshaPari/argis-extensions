@@ -196,7 +196,7 @@
     },
     {
       "type": "row",
-      "title": "SLO Burn Rate (multiply by 10000 to convert from argis-monitor's scaled unit)",
+      "title": "SLO Burn Rate (divide by 10000 to convert from argis-monitor's scaled unit)",
       "gridPos": {
         "h": 1,
         "w": 24,

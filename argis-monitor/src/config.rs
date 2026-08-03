@@ -3,6 +3,7 @@
 //! Loaded from CLI flags, env vars (prefix `ARGIS_MONITOR_`), and/or a YAML
 //! file. See `examples/basic.yaml` for a complete example.
 
+use std::fmt;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -38,7 +39,7 @@ impl Default for SLO {
 }
 
 /// Top-level configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
     /// Targets to poll. At least one required. The monitor spawns one tokio
     /// task per target. Each target's `provider` label is its `name`.
@@ -103,6 +104,29 @@ fn default_poll_interval() -> Duration { Duration::from_secs(15) }
 fn default_poll_timeout() -> Duration { Duration::from_secs(5) }
 fn default_exporter_addr() -> String { "0.0.0.0:9090".to_string() }
 
+impl fmt::Debug for Config {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Config")
+            .field("targets", &self.targets)
+            .field("poll_interval", &self.poll_interval)
+            .field("poll_timeout", &self.poll_timeout)
+            .field("exporter_addr", &self.exporter_addr)
+            .field("slos", &self.slos)
+            .field("alert_rules_count", &self.alert_rules.len())
+            .field(
+                "bearer_token",
+                &self.bearer_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("alert_windows", &self.alert_windows)
+            .field("data_dir", &self.data_dir)
+            .field("push_url", &self.push_url)
+            .field("push_interval_secs", &self.push_interval_secs)
+            .field("push_job", &self.push_job)
+            .field("push_instance", &self.push_instance)
+            .finish()
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -144,6 +168,33 @@ impl Config {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn for_test_disables_persistent_state() {
+        assert!(Config::for_test("http://127.0.0.1:8080").data_dir.is_none());
+    }
+
+    #[test]
+    fn debug_redacts_credentials() {
+        let mut config = Config::default();
+        config.bearer_token = Some("bearer-secret".into());
+        config.alert_rules.push(crate::alerts::AlertRule {
+            webhooks: vec![crate::alerts::WebhookTarget {
+                aws_secret_access_key: Some("aws-secret".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        let rendered = format!("{config:?}");
+        assert!(!rendered.contains("bearer-secret"));
+        assert!(!rendered.contains("aws-secret"));
+        assert!(rendered.contains("<redacted>"));
+    }
+}
+
 impl Config {
     /// Set the poll interval (used when no per-target override is set).
     pub fn with_poll_interval_secs(mut self, secs: u64) -> Self {
@@ -176,22 +227,8 @@ mod seconds_as_duration {
         enum Repr { Secs(u64), Text(String) }
         match Repr::deserialize(d)? {
             Repr::Secs(n) => Ok(Duration::from_secs(n)),
-            Repr::Text(t) => parse_human(&t).map_err(serde::de::Error::custom),
+            Repr::Text(t) => crate::duration::parse_human(&t).map_err(serde::de::Error::custom),
         }
-    }
-
-    fn parse_human(s: &str) -> Result<Duration, String> {
-        let s = s.trim();
-        let (num, unit) = s.split_at(s.len().saturating_sub(1));
-        let n: u64 = num.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-        let mul = match unit {
-            "s" => 1,
-            "m" => 60,
-            "h" => 3600,
-            "d" => 86_400,
-            _ => return Err(format!("unknown duration unit: {unit}")),
-        };
-        Ok(Duration::from_secs(n * mul))
     }
 }
 
@@ -200,6 +237,8 @@ impl Config {
     /// Convenience for tests: a single-target Config pointing at `target`.
     #[doc(hidden)]
     pub fn for_test(target: impl Into<String>) -> Self {
-        Self::default().with_target_url(target)
+        let mut config = Self::default().with_target_url(target);
+        config.data_dir = None;
+        config
     }
 }

@@ -43,6 +43,7 @@ pub mod alerts;
 pub mod aws_sigv4;
 pub mod config;
 pub mod dashboard;
+mod duration;
 pub mod exporter;
 pub mod metrics;
 pub mod poller;

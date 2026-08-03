@@ -11,10 +11,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo install cargo-llvm-cov --quiet
-      - run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+      - run: cargo llvm-cov --manifest-path argis-monitor/Cargo.toml --workspace --lcov --output-path lcov.info
       - name: Check 80% threshold
         run: |
-          pct=$(cargo llvm-cov --workspace --no-cfg-coverage 2>/dev/null | grep -oE 'Coverage [0-9.]+%' | head -1 | grep -oE '[0-9.]+')
+          pct=$(cargo llvm-cov --manifest-path argis-monitor/Cargo.toml --workspace --no-cfg-coverage 2>/dev/null | grep -oE 'Coverage [0-9.]+%' | head -1 | grep -oE '[0-9.]+')
           echo "coverage=$pct%"
           awk -v p="$pct" 'BEGIN { if (p+0 < 80) { print "FAIL: " p "% < 80%"; exit 1 } else { print "PASS: " p "% >= 80%" } }'
       - uses: actions/upload-artifact@v4
