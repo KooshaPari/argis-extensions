@@ -230,14 +230,20 @@ impl Monitor {
 
         let mut burn_rates = Vec::with_capacity(self.inner.config.slos.len());
         for slo in &self.inner.config.slos {
-            let short_window = BurnWindow::FAST_BURN.short.as_secs().min(slo.window_secs);
-            let long_window = BurnWindow::FAST_BURN.long.as_secs().min(slo.window_secs);
-            let (short_success, short_failure) = c.counts(ts, short_window);
-            let (long_success, long_failure) = c.counts(ts, long_window);
-            let bs = burn_rate(short_success, short_failure, slo.target);
-            let bl = burn_rate(long_success, long_failure, slo.target);
+            let fast_short = BurnWindow::FAST_BURN.short.as_secs().min(slo.window_secs);
+            let fast_long = BurnWindow::FAST_BURN.long.as_secs().min(slo.window_secs);
+            let slow_short = BurnWindow::SLOW_BURN.short.as_secs().min(slo.window_secs);
+            let slow_long = BurnWindow::SLOW_BURN.long.as_secs().min(slo.window_secs);
+            let (fast_short_success, fast_short_failure) = c.counts(ts, fast_short);
+            let (fast_long_success, fast_long_failure) = c.counts(ts, fast_long);
+            let (slow_short_success, slow_short_failure) = c.counts(ts, slow_short);
+            let (slow_long_success, slow_long_failure) = c.counts(ts, slow_long);
+            let bs = burn_rate(fast_short_success, fast_short_failure, slo.target);
+            let bl = burn_rate(fast_long_success, fast_long_failure, slo.target);
+            let slow_bs = burn_rate(slow_short_success, slow_short_failure, slo.target);
+            let slow_bl = burn_rate(slow_long_success, slow_long_failure, slo.target);
             m.record_burn(&slo.name, BurnWindow::FAST_BURN, bs);
-            m.record_burn(&slo.name, BurnWindow::SLOW_BURN, bl);
+            m.record_burn(&slo.name, BurnWindow::SLOW_BURN, slow_bl.max(slow_bs));
             burn_rates.push(SloBurn {
                 slo: slo.name.clone(),
                 burn_short: bs,
