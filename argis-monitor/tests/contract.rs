@@ -32,14 +32,26 @@ async fn healthy_target_polls_and_emits_metrics() {
 
     let mut buf = String::new();
     encode(&mut buf, &registry).unwrap();
-    assert!(buf.contains("argis_monitor_polls_total"), "expected polls_total in:
-{buf}");
-    assert!(buf.contains("argis_monitor_up"), "expected up gauge in:
-{buf}");
-    assert!(buf.contains("argis_monitor_target_info"), "expected target_info in:
-{buf}");
-    assert!(buf.contains("argis_monitor_slo_target"), "expected slo_target in:
-{buf}");
+    assert!(
+        buf.contains("argis_monitor_polls_total"),
+        "expected polls_total in:
+{buf}"
+    );
+    assert!(
+        buf.contains("argis_monitor_up"),
+        "expected up gauge in:
+{buf}"
+    );
+    assert!(
+        buf.contains("argis_monitor_target_info"),
+        "expected target_info in:
+{buf}"
+    );
+    assert!(
+        buf.contains("argis_monitor_slo_target"),
+        "expected slo_target in:
+{buf}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -66,12 +78,14 @@ async fn transport_failure_records_zero_status() {
     let port = listener.local_addr().unwrap().port();
     drop(listener);
 
-    let cfg = Config::for_test(format!("http://127.0.0.1:{port}"))
-        .with_poll_interval_secs(1);
+    let cfg = Config::for_test(format!("http://127.0.0.1:{port}")).with_poll_interval_secs(1);
     let monitor = Monitor::new(cfg).unwrap();
     let outcome = monitor.poll_once().await.unwrap();
     assert_eq!(outcome.sample.outcome, Outcome::Error);
-    assert_eq!(outcome.sample.status_code, 0, "transport failure should be status_code=0");
+    assert_eq!(
+        outcome.sample.status_code, 0,
+        "transport failure should be status_code=0"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -86,7 +100,9 @@ async fn exporter_serves_metrics_text_format() {
     let cfg = Config::for_test(server.uri());
     let monitor = Monitor::new(cfg).unwrap();
     monitor.poll_once().await.unwrap();
-    let handle = exporter::serve("127.0.0.1:0", monitor.registry()).await.unwrap();
+    let handle = exporter::serve("127.0.0.1:0", monitor.registry())
+        .await
+        .unwrap();
     let url = format!("http://{}/metrics", handle.addr);
 
     let body = reqwest::get(&url).await.unwrap().text().await.unwrap();
@@ -99,20 +115,29 @@ async fn exporter_serves_metrics_text_format() {
 async fn multi_window_burn_reflects_error_traffic() {
     let server = MockServer::start().await;
     // First poll: ok. Subsequent polls: 503.
-    let _m1 = Mock::given(method("GET")).and(path("/health"))
+    let _m1 = Mock::given(method("GET"))
+        .and(path("/health"))
         .respond_with(ResponseTemplate::new(200))
         .expect(1..)
         .mount(&server);
-    Mock::given(method("GET")).and(path("/health"))
+    Mock::given(method("GET"))
+        .and(path("/health"))
         .respond_with(ResponseTemplate::new(503))
         .mount(&server)
         .await;
 
-    let cfg = Config::for_test(server.uri())
-        .with_slo(SLO { name: "chat".into(), window_secs: 3600, target: 0.999 });
+    let cfg = Config::for_test(server.uri()).with_slo(SLO {
+        name: "chat".into(),
+        window_secs: 3600,
+        target: 0.999,
+    });
     let monitor = Monitor::new(cfg).unwrap();
     monitor.poll_once().await.unwrap();
     monitor.poll_once().await.unwrap();
     let outcome = monitor.poll_once().await.unwrap();
-    assert!(outcome.burn_short > 0.0, "burn_short should rise after errors; got {}", outcome.burn_short);
+    assert!(
+        outcome.burn_short > 0.0,
+        "burn_short should rise after errors; got {}",
+        outcome.burn_short
+    );
 }

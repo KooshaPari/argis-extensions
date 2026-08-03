@@ -24,8 +24,12 @@ pub struct SLO {
     pub target: f64,
 }
 
-fn default_slo_window_secs() -> u64 { 30 * 24 * 3600 }
-fn default_slo_target() -> f64 { 0.999 }
+fn default_slo_window_secs() -> u64 {
+    30 * 24 * 3600
+}
+fn default_slo_target() -> f64 {
+    0.999
+}
 
 impl Default for SLO {
     fn default() -> Self {
@@ -59,9 +63,15 @@ pub struct Config {
     pub bearer_token: Option<String>,
 }
 
-fn default_poll_interval() -> Duration { Duration::from_secs(15) }
-fn default_poll_timeout() -> Duration { Duration::from_secs(5) }
-fn default_exporter_addr() -> String { "0.0.0.0:9090".to_string() }
+fn default_poll_interval() -> Duration {
+    Duration::from_secs(15)
+}
+fn default_poll_timeout() -> Duration {
+    Duration::from_secs(5)
+}
+fn default_exporter_addr() -> String {
+    "0.0.0.0:9090".to_string()
+}
 
 impl Default for Config {
     fn default() -> Self {
@@ -78,14 +88,19 @@ impl Default for Config {
 
 impl Config {
     /// Set the target gateway URL.
-    pub fn with_target(mut self, target: String) -> Self { self.target = target; self }
+    pub fn with_target(mut self, target: String) -> Self {
+        self.target = target;
+        self
+    }
     /// Set the poll interval.
     pub fn with_poll_interval_secs(mut self, secs: u64) -> Self {
-        self.poll_interval = Duration::from_secs(secs); self
+        self.poll_interval = Duration::from_secs(secs);
+        self
     }
     /// Add a single SLO.
     pub fn with_slo(mut self, slo: SLO) -> Self {
-        self.slos.push(slo); self
+        self.slos.push(slo);
+        self
     }
 }
 
@@ -103,7 +118,10 @@ mod seconds_as_duration {
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
         #[derive(Deserialize)]
         #[serde(untagged)]
-        enum Repr { Secs(u64), Text(String) }
+        enum Repr {
+            Secs(u64),
+            Text(String),
+        }
         match Repr::deserialize(d)? {
             Repr::Secs(n) => Ok(Duration::from_secs(n)),
             Repr::Text(t) => parse_human(&t).map_err(serde::de::Error::custom),
@@ -113,7 +131,9 @@ mod seconds_as_duration {
     fn parse_human(s: &str) -> Result<Duration, String> {
         let s = s.trim();
         let (num, unit) = s.split_at(s.len().saturating_sub(1));
-        let n: u64 = num.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let n: u64 = num
+            .parse()
+            .map_err(|e: std::num::ParseIntError| e.to_string())?;
         let mul = match unit {
             "s" => 1,
             "m" => 60,

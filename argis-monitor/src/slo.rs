@@ -38,13 +38,19 @@ impl BurnWindow {
 /// Returns 0.0 if no requests observed in the window.
 pub fn burn_rate(successes: u64, failures: u64, target: f64) -> f64 {
     let total = successes + failures;
-    if total == 0 { return 0.0; }
+    if total == 0 {
+        return 0.0;
+    }
     let success_ratio = successes as f64 / total as f64;
     let error_ratio = 1.0 - success_ratio;
     let allowed_error = 1.0 - target;
     if allowed_error <= 0.0 {
         // SLO is "100% success". Any failure is unbounded burn.
-        return if error_ratio > 0.0 { f64::INFINITY } else { 0.0 };
+        return if error_ratio > 0.0 {
+            f64::INFINITY
+        } else {
+            0.0
+        };
     }
     error_ratio / allowed_error
 }
@@ -53,8 +59,10 @@ pub fn burn_rate(successes: u64, failures: u64, target: f64) -> f64 {
 /// the SRE alerting recipe (alert when short_window_burn > 14.4 AND
 /// long_window_burn > 14.4). We return both for richer dashboards.
 pub fn multi_window_burn(
-    short_success: u64, short_failure: u64,
-    long_success: u64, long_failure: u64,
+    short_success: u64,
+    short_failure: u64,
+    long_success: u64,
+    long_failure: u64,
     target: f64,
 ) -> (f64, f64) {
     let short = burn_rate(short_success, short_failure, target);

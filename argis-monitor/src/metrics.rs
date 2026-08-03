@@ -75,7 +75,10 @@ pub struct Sample {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum Outcome { Ok, Error }
+pub enum Outcome {
+    Ok,
+    Error,
+}
 
 // =====================================================================
 // Metrics.
@@ -99,8 +102,10 @@ impl Metrics {
         // Histogram bucket boundaries in seconds (f64); we observe `latency.as_secs_f64()`.
         let poll_duration = Family::<ProviderLabels, Histogram>::new_with_constructor(|| {
             Histogram::new(
-                [0.005_f64, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
-                    .into_iter(),
+                [
+                    0.005_f64, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+                ]
+                .into_iter(),
             )
         });
         let last_poll_ts = Family::<ProviderLabels, Gauge>::default();
@@ -109,11 +114,31 @@ impl Metrics {
         let slo_target = Family::<SloOnlyLabels, Gauge>::default();
         let target_info = Family::<InfoLabels, Counter>::default();
 
-        registry.register("argis_monitor_polls_total", "Total polls attempted.", polls_total.clone());
-        registry.register("argis_monitor_poll_errors_total", "Total polls that failed.", poll_errors_total.clone());
-        registry.register("argis_monitor_poll_duration_seconds", "Poll latency in seconds.", poll_duration.clone());
-        registry.register("argis_monitor_last_poll_timestamp_seconds", "Unix timestamp of last successful poll.", last_poll_ts.clone());
-        registry.register("argis_monitor_up", "1 if last poll succeeded for this provider, else 0.", up.clone());
+        registry.register(
+            "argis_monitor_polls_total",
+            "Total polls attempted.",
+            polls_total.clone(),
+        );
+        registry.register(
+            "argis_monitor_poll_errors_total",
+            "Total polls that failed.",
+            poll_errors_total.clone(),
+        );
+        registry.register(
+            "argis_monitor_poll_duration_seconds",
+            "Poll latency in seconds.",
+            poll_duration.clone(),
+        );
+        registry.register(
+            "argis_monitor_last_poll_timestamp_seconds",
+            "Unix timestamp of last successful poll.",
+            last_poll_ts.clone(),
+        );
+        registry.register(
+            "argis_monitor_up",
+            "1 if last poll succeeded for this provider, else 0.",
+            up.clone(),
+        );
         registry.register(
             "argis_monitor_burn_rate",
             "Current SLO burn rate as basis-points x 100 (1.0 -> 10000, 14.4 -> 144000). Divide by 10000 to get the float burn rate.",
@@ -124,13 +149,29 @@ impl Metrics {
             "Configured SLO target as per-mille integer (0.999 -> 999, 0.95 -> 950). Divide by 1000 to get the float target.",
             slo_target.clone(),
         );
-        registry.register("argis_monitor_target_info", "Static info about the target gateway.", target_info.clone());
+        registry.register(
+            "argis_monitor_target_info",
+            "Static info about the target gateway.",
+            target_info.clone(),
+        );
 
         target_info
-            .get_or_create(&InfoLabels { target: target.into(), version: env!("CARGO_PKG_VERSION").into() })
+            .get_or_create(&InfoLabels {
+                target: target.into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            })
             .inc();
 
-        Self { polls_total, poll_errors_total, poll_duration, last_poll_ts, up, burn_rate, slo_target, target_info }
+        Self {
+            polls_total,
+            poll_errors_total,
+            poll_duration,
+            last_poll_ts,
+            up,
+            burn_rate,
+            slo_target,
+            target_info,
+        }
     }
 
     pub fn record_sample(&self, s: &Sample) {
@@ -138,39 +179,53 @@ impl Metrics {
             Outcome::Ok => "ok",
             Outcome::Error => "error",
         };
-        self.polls_total.get_or_create(&PollLabels {
-            provider: s.provider.clone(),
-            outcome: outcome_str.into(),
-        }).inc();
+        self.polls_total
+            .get_or_create(&PollLabels {
+                provider: s.provider.clone(),
+                outcome: outcome_str.into(),
+            })
+            .inc();
 
-        let provider = ProviderLabels { provider: s.provider.clone() };
+        let provider = ProviderLabels {
+            provider: s.provider.clone(),
+        };
 
         if s.outcome == Outcome::Error {
-            self.poll_errors_total.get_or_create(&ErrorLabels {
-                provider: s.provider.clone(),
-                error_kind: error_kind(s.status_code),
-            }).inc();
+            self.poll_errors_total
+                .get_or_create(&ErrorLabels {
+                    provider: s.provider.clone(),
+                    error_kind: error_kind(s.status_code),
+                })
+                .inc();
             self.up.get_or_create(&provider).set(0);
         } else {
             self.up.get_or_create(&provider).set(1);
-            self.last_poll_ts.get_or_create(&provider).set(s.timestamp_secs as i64);
-            self.poll_duration.get_or_create(&provider).observe(s.latency.as_secs_f64());
+            self.last_poll_ts
+                .get_or_create(&provider)
+                .set(s.timestamp_secs as i64);
+            self.poll_duration
+                .get_or_create(&provider)
+                .observe(s.latency.as_secs_f64());
         }
     }
 
     /// Set the current burn rate. Stored as basis-points x 100.
     pub fn record_burn(&self, slo: &str, window: BurnWindow, value: f64) {
         let scaled = (value * 10_000.0).round() as i64;
-        self.burn_rate.get_or_create(&SloLabels {
-            slo: slo.into(),
-            window: window_label(window),
-        }).set(scaled);
+        self.burn_rate
+            .get_or_create(&SloLabels {
+                slo: slo.into(),
+                window: window_label(window),
+            })
+            .set(scaled);
     }
 
     /// Pin the SLO target ratio. Stored as per-mille integer.
     pub fn record_slo_target(&self, slo: &str, target: f64) {
         let scaled = (target * 1_000.0).round() as i64;
-        self.slo_target.get_or_create(&SloOnlyLabels { slo: slo.into() }).set(scaled);
+        self.slo_target
+            .get_or_create(&SloOnlyLabels { slo: slo.into() })
+            .set(scaled);
     }
 }
 
@@ -196,6 +251,10 @@ fn error_kind(status: u16) -> String {
 
 mod ts_secs {
     use serde::{Deserialize, Deserializer, Serializer};
-    pub fn serialize<S: Serializer>(v: &u64, s: S) -> Result<S::Ok, S::Error> { s.serialize_u64(*v) }
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> { u64::deserialize(d) }
+    pub fn serialize<S: Serializer>(v: &u64, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_u64(*v)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+        u64::deserialize(d)
+    }
 }

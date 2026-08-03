@@ -40,10 +40,9 @@ pub async fn serve(addr: &str, registry: Arc<Registry>) -> anyhow::Result<Export
 
     tokio::spawn(async move {
         info!(addr = %local_addr, "argis-monitor exporter listening");
-        let server = axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                let _ = rx.changed().await;
-            });
+        let server = axum::serve(listener, app).with_graceful_shutdown(async move {
+            let _ = rx.changed().await;
+        });
         if let Err(e) = server.await {
             error!(error = %e, "exporter server stopped");
         }
@@ -60,16 +59,26 @@ async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
     if let Err(e) = encode(&mut buf, &state.registry) {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
-            [(axum::http::header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-            format!("encode error: {e}
-"),
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; charset=utf-8",
+            )],
+            format!(
+                "encode error: {e}
+"
+            ),
         );
     }
     (
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
         buf,
     )
 }
 
-async fn healthz() -> &'static str { "ok" }
+async fn healthz() -> &'static str {
+    "ok"
+}

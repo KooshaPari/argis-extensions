@@ -38,12 +38,11 @@
 //!
 //! CLI usage: see `argis-monitor --help`.
 
-
 pub mod config;
+pub mod exporter;
 pub mod metrics;
 pub mod poller;
 pub mod slo;
-pub mod exporter;
 
 pub use config::{Config, SLO};
 pub use metrics::{Outcome, Sample};

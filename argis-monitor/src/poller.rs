@@ -66,9 +66,9 @@ impl Monitor {
         if let Some(tok) = &config.bearer_token {
             headers.insert(
                 reqwest::header::AUTHORIZATION,
-                format!("Bearer {tok}").parse().map_err(|_| {
-                    PollError::InvalidConfig("invalid bearer token".into())
-                })?,
+                format!("Bearer {tok}")
+                    .parse()
+                    .map_err(|_| PollError::InvalidConfig("invalid bearer token".into()))?,
             );
         }
         let http = reqwest::Client::builder()
@@ -95,7 +95,9 @@ impl Monitor {
     }
 
     /// Borrow the underlying registry (used by the exporter).
-    pub fn registry(&self) -> Arc<Registry> { self.inner.registry.clone() }
+    pub fn registry(&self) -> Arc<Registry> {
+        self.inner.registry.clone()
+    }
 
     /// Run the poll loop forever (or until SIGINT/SIGTERM).
     pub async fn run(&self) -> anyhow::Result<()> {
@@ -106,11 +108,11 @@ impl Monitor {
             "argis-monitor starting"
         );
 
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-        let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
-
         let mut ticker = tokio::time::interval(cfg.poll_interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        let shutdown = shutdown_signal();
+        tokio::pin!(shutdown);
 
         loop {
             tokio::select! {
@@ -120,8 +122,10 @@ impl Monitor {
                         Err(err) => warn!(error = %err, "poll failed"),
                     }
                 }
-                _ = sigterm.recv() => { info!("SIGTERM, exiting"); break; }
-                _ = sigint.recv()  => { info!("SIGINT, exiting");  break; }
+                signal = &mut shutdown => {
+                    info!(signal = signal?, "shutdown signal, exiting");
+                    break;
+                }
             }
         }
         Ok(())
@@ -133,7 +137,10 @@ impl Monitor {
         let url = format!("{}/health", self.inner.config.target.trim_end_matches('/'));
         let res = self.inner.http.get(&url).send().await;
         let latency = started.elapsed();
-        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
 
         let sample = match res {
             Ok(resp) => {
@@ -193,16 +200,39 @@ impl Monitor {
             burn_short = bs;
             burn_long = bl;
         }
-        Ok(PollOutcome { sample, burn_short, burn_long })
+        Ok(PollOutcome {
+            sample,
+            burn_short,
+            burn_long,
+        })
     }
 
     /// Get a clone of the active config.
-    pub fn config(&self) -> Config { self.inner.config.clone() }
+    pub fn config(&self) -> Config {
+        self.inner.config.clone()
+    }
 
     /// Reference the canonical fast-burn / slow-burn windows.
     pub fn windows(&self) -> &'static [BurnWindow] {
         &[BurnWindow::FAST_BURN, BurnWindow::SLOW_BURN]
     }
+}
+
+#[cfg(unix)]
+async fn shutdown_signal() -> anyhow::Result<&'static str> {
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+
+    tokio::select! {
+        _ = sigterm.recv() => Ok("SIGTERM"),
+        _ = sigint.recv() => Ok("SIGINT"),
+    }
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() -> anyhow::Result<&'static str> {
+    tokio::signal::ctrl_c().await?;
+    Ok("CTRL_C")
 }
 
 impl Config {
@@ -218,7 +248,13 @@ impl Config {
 
 impl SLO {
     /// Convenience builder.
-    pub fn with_window_secs(mut self, secs: u64) -> Self { self.window_secs = secs; self }
+    pub fn with_window_secs(mut self, secs: u64) -> Self {
+        self.window_secs = secs;
+        self
+    }
     /// Convenience builder.
-    pub fn with_target(mut self, target: f64) -> Self { self.target = target; self }
+    pub fn with_target(mut self, target: f64) -> Self {
+        self.target = target;
+        self
+    }
 }

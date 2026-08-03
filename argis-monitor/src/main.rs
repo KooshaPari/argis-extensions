@@ -9,7 +9,11 @@ use tracing_subscriber::EnvFilter;
 use argis_monitor::{exporter, Config, Monitor};
 
 #[derive(Debug, Parser)]
-#[command(name = "argis-monitor", version, about = "Observable Integration substrate for bifrost-extensions (Tenet 4).")]
+#[command(
+    name = "argis-monitor",
+    version,
+    about = "Observable Integration substrate for bifrost-extensions (Tenet 4)."
+)]
 struct Cli {
     /// Path to a YAML config file. CLI flags and env (ARGIS_MONITOR_*) override.
     #[arg(long, global = true, env = "ARGIS_MONITOR_CONFIG")]
@@ -27,7 +31,11 @@ enum Cmd {
         target: Option<String>,
         #[arg(long, env = "ARGIS_MONITOR_POLL_INTERVAL", default_value = "15")]
         poll_interval_secs: u64,
-        #[arg(long, env = "ARGIS_MONITOR_EXPORTER_ADDR", default_value = "0.0.0.0:9090")]
+        #[arg(
+            long,
+            env = "ARGIS_MONITOR_EXPORTER_ADDR",
+            default_value = "0.0.0.0:9090"
+        )]
         exporter_addr: String,
     },
     /// Run exactly one poll (for smoke tests + cron).
@@ -45,22 +53,32 @@ enum Cmd {
 fn main() -> anyhow::Result<()> {
     init_tracing();
     let cli = Cli::parse();
-    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
     rt.block_on(run(cli))
 }
 
 async fn run(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
-        Cmd::Start { target, poll_interval_secs, exporter_addr } => {
+        Cmd::Start {
+            target,
+            poll_interval_secs,
+            exporter_addr,
+        } => {
             let mut cfg = load_config(cli.config.as_deref())?;
-            if let Some(t) = target { cfg.target = t; }
+            if let Some(t) = target {
+                cfg.target = t;
+            }
             cfg.poll_interval = Duration::from_secs(poll_interval_secs);
             cfg.exporter_addr = exporter_addr;
             run_monitor(cfg).await
         }
         Cmd::Once { target } => {
             let mut cfg = load_config(cli.config.as_deref())?;
-            if let Some(t) = target { cfg.target = t; }
+            if let Some(t) = target {
+                cfg.target = t;
+            }
             let monitor = Monitor::new(cfg)?;
             let outcome = monitor.poll_once().await?;
             println!("{}", serde_json::to_string_pretty(&outcome)?);
