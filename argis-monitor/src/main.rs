@@ -29,14 +29,10 @@ enum Cmd {
     Start {
         #[arg(long, env = "ARGIS_MONITOR_TARGET")]
         target: Option<String>,
-        #[arg(long, env = "ARGIS_MONITOR_POLL_INTERVAL", default_value = "15")]
-        poll_interval_secs: u64,
-        #[arg(
-            long,
-            env = "ARGIS_MONITOR_EXPORTER_ADDR",
-            default_value = "0.0.0.0:9090"
-        )]
-        exporter_addr: String,
+        #[arg(long, env = "ARGIS_MONITOR_POLL_INTERVAL")]
+        poll_interval_secs: Option<u64>,
+        #[arg(long, env = "ARGIS_MONITOR_EXPORTER_ADDR")]
+        exporter_addr: Option<String>,
     },
     /// Run exactly one poll (for smoke tests + cron).
     Once {
@@ -70,8 +66,12 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             if let Some(t) = target {
                 cfg.target = t;
             }
-            cfg.poll_interval = Duration::from_secs(poll_interval_secs);
-            cfg.exporter_addr = exporter_addr;
+            if let Some(secs) = poll_interval_secs {
+                cfg.poll_interval = Duration::from_secs(secs);
+            }
+            if let Some(addr) = exporter_addr {
+                cfg.exporter_addr = addr;
+            }
             run_monitor(cfg).await
         }
         Cmd::Once { target } => {

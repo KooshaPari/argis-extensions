@@ -56,7 +56,7 @@ pub struct Config {
     #[serde(default = "default_exporter_addr")]
     pub exporter_addr: String,
     /// SLOs to track. Defaults to a single "three nines" chat-completions SLO.
-    #[serde(default)]
+    #[serde(default = "default_slos")]
     pub slos: Vec<SLO>,
     /// Optional bearer token sent on every poll. Use for protected gateways.
     #[serde(default)]
@@ -73,6 +73,10 @@ fn default_exporter_addr() -> String {
     "0.0.0.0:9090".to_string()
 }
 
+fn default_slos() -> Vec<SLO> {
+    vec![SLO::default()]
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -80,13 +84,48 @@ impl Default for Config {
             poll_interval: default_poll_interval(),
             poll_timeout: default_poll_timeout(),
             exporter_addr: default_exporter_addr(),
-            slos: vec![SLO::default()],
+            slos: default_slos(),
             bearer_token: None,
         }
     }
 }
 
 impl Config {
+    /// Validate values which would otherwise make the poll loop panic or
+    /// produce meaningless SLO metrics.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.target.trim().is_empty() {
+            return Err("target must not be empty".into());
+        }
+        if self.poll_interval.is_zero() {
+            return Err("poll_interval must be greater than zero".into());
+        }
+        if self.poll_timeout.is_zero() {
+            return Err("poll_timeout must be greater than zero".into());
+        }
+        if self.slos.is_empty() {
+            return Err("at least one SLO is required".into());
+        }
+        for slo in &self.slos {
+            if slo.name.trim().is_empty() {
+                return Err("SLO name must not be empty".into());
+            }
+            if slo.window_secs == 0 {
+                return Err(format!(
+                    "SLO {} window_secs must be greater than zero",
+                    slo.name
+                ));
+            }
+            if !slo.target.is_finite() || !(0.0..=1.0).contains(&slo.target) {
+                return Err(format!(
+                    "SLO {} target must be finite and in [0.0, 1.0]",
+                    slo.name
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Set the target gateway URL.
     pub fn with_target(mut self, target: String) -> Self {
         self.target = target;

@@ -141,7 +141,7 @@ impl Metrics {
         );
         registry.register(
             "argis_monitor_burn_rate",
-            "Current SLO burn rate as basis-points x 100 (1.0 -> 10000, 14.4 -> 144000). Divide by 10000 to get the float burn rate.",
+            "Current SLO burn rate as basis-points x 100 (1.0 -> 10000, 14.4 -> 144000). Divide by 10000; unbounded infinity is represented by i64::MAX.",
             burn_rate.clone(),
         );
         registry.register(
@@ -203,15 +203,23 @@ impl Metrics {
             self.last_poll_ts
                 .get_or_create(&provider)
                 .set(s.timestamp_secs as i64);
-            self.poll_duration
-                .get_or_create(&provider)
-                .observe(s.latency.as_secs_f64());
         }
+        self.poll_duration
+            .get_or_create(&provider)
+            .observe(s.latency.as_secs_f64());
     }
 
     /// Set the current burn rate. Stored as basis-points x 100.
     pub fn record_burn(&self, slo: &str, window: BurnWindow, value: f64) {
-        let scaled = (value * 10_000.0).round() as i64;
+        let scaled = if value == f64::INFINITY {
+            i64::MAX
+        } else if !value.is_finite() {
+            0
+        } else {
+            (value * 10_000.0)
+                .round()
+                .clamp(i64::MIN as f64, i64::MAX as f64) as i64
+        };
         self.burn_rate
             .get_or_create(&SloLabels {
                 slo: slo.into(),

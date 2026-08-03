@@ -6,6 +6,7 @@
 //! recomputation uses an approximate sliding counter; production should
 //! swap in a ring buffer (see docs/SLO_SPEC.md).
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -25,6 +26,15 @@ pub struct PollOutcome {
     pub sample: Sample,
     pub burn_short: f64,
     pub burn_long: f64,
+    /// Burn values keyed by SLO. The legacy pair above mirrors the first SLO.
+    pub burn_rates: Vec<SloBurn>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SloBurn {
+    pub slo: String,
+    pub burn_short: f64,
+    pub burn_long: f64,
 }
 
 /// Errors the poller can encounter.
@@ -36,13 +46,39 @@ pub enum PollError {
     InvalidConfig(String),
 }
 
-/// Aggregated counters per (provider, SLO) used by the burn-rate calculator.
+/// Timestamped outcomes retained only for the configured rolling windows.
 #[derive(Default, Debug)]
 struct SlidingCounters {
-    short_success: u64,
-    short_failure: u64,
-    long_success: u64,
-    long_failure: u64,
+    samples: VecDeque<(u64, bool)>,
+}
+
+impl SlidingCounters {
+    fn push(&mut self, timestamp_secs: u64, success: bool) {
+        self.samples.push_back((timestamp_secs, success));
+    }
+
+    fn prune(&mut self, now: u64, max_window_secs: u64) {
+        let cutoff = now.saturating_sub(max_window_secs);
+        while self.samples.front().is_some_and(|(ts, _)| *ts < cutoff) {
+            self.samples.pop_front();
+        }
+    }
+
+    fn counts(&self, now: u64, window_secs: u64) -> (u64, u64) {
+        let cutoff = now.saturating_sub(window_secs);
+        self.samples.iter().filter(|(ts, _)| *ts >= cutoff).fold(
+            (0, 0),
+            |(success, failure), (ts, ok)| {
+                if *ts < cutoff {
+                    (success, failure)
+                } else if *ok {
+                    (success + 1, failure)
+                } else {
+                    (success, failure + 1)
+                }
+            },
+        )
+    }
 }
 
 /// The monitor: shared registry + metrics + config + HTTP client.
@@ -62,6 +98,7 @@ pub(crate) struct MonitorInner {
 impl Monitor {
     /// Build a new monitor from `config`.
     pub fn new(config: Config) -> Result<Self, PollError> {
+        config.validate().map_err(PollError::InvalidConfig)?;
         let mut headers = reqwest::header::HeaderMap::new();
         if let Some(tok) = &config.bearer_token {
             headers.insert(
@@ -179,31 +216,43 @@ impl Monitor {
         m.record_sample(&sample);
 
         let mut c = self.inner.counters.lock().await;
-        match sample.outcome {
-            Outcome::Ok => {
-                c.short_success += 1;
-                c.long_success += 1;
-            }
-            Outcome::Error => {
-                c.short_failure += 1;
-                c.long_failure += 1;
-            }
-        }
+        c.push(ts, sample.outcome == Outcome::Ok);
+        let max_window = self
+            .inner
+            .config
+            .slos
+            .iter()
+            .map(|slo| slo.window_secs)
+            .max()
+            .unwrap_or(0)
+            .min(BurnWindow::SLOW_BURN.long.as_secs());
+        c.prune(ts, max_window);
 
-        let mut burn_short = 0.0_f64;
-        let mut burn_long = 0.0_f64;
+        let mut burn_rates = Vec::with_capacity(self.inner.config.slos.len());
         for slo in &self.inner.config.slos {
-            let bs = burn_rate(c.short_success, c.short_failure, slo.target);
-            let bl = burn_rate(c.long_success, c.long_failure, slo.target);
+            let short_window = BurnWindow::FAST_BURN.short.as_secs().min(slo.window_secs);
+            let long_window = BurnWindow::FAST_BURN.long.as_secs().min(slo.window_secs);
+            let (short_success, short_failure) = c.counts(ts, short_window);
+            let (long_success, long_failure) = c.counts(ts, long_window);
+            let bs = burn_rate(short_success, short_failure, slo.target);
+            let bl = burn_rate(long_success, long_failure, slo.target);
             m.record_burn(&slo.name, BurnWindow::FAST_BURN, bs);
             m.record_burn(&slo.name, BurnWindow::SLOW_BURN, bl);
-            burn_short = bs;
-            burn_long = bl;
+            burn_rates.push(SloBurn {
+                slo: slo.name.clone(),
+                burn_short: bs,
+                burn_long: bl,
+            });
         }
+        let (burn_short, burn_long) = burn_rates
+            .first()
+            .map(|r| (r.burn_short, r.burn_long))
+            .unwrap_or((0.0, 0.0));
         Ok(PollOutcome {
             sample,
             burn_short,
             burn_long,
+            burn_rates,
         })
     }
 
