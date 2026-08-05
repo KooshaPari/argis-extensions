@@ -213,7 +213,7 @@ pub fn evaluate(
                 return Decision::Fire(payload);
             }
             let since_fire = ts.saturating_sub(last_fired_at);
-            if since_fire >= rule.cooldown.as_secs() {
+            if burn >= rule.threshold && since_fire >= rule.cooldown.as_secs() {
                 tracker.state = AlertState::Firing { since, last_fired_at: ts };
                 let payload = AlertPayload::firing(&rule.name, target, &rule.slo, burn, rule.threshold, ts);
                 Decision::Fire(payload)
