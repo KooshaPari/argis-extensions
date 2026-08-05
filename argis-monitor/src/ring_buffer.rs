@@ -41,7 +41,11 @@ impl RingBuffer {
     /// timestamp anchor for advance().
     pub fn with_bucket_size(total_window_secs: u64, bucket_size_secs: u64, now_secs: u64) -> Self {
         assert!(bucket_size_secs > 0, "bucket_size_secs must be > 0");
-        let n_buckets = (total_window_secs / bucket_size_secs).max(1) as usize;
+        let n_buckets = total_window_secs
+            .saturating_add(bucket_size_secs - 1)
+            .checked_div(bucket_size_secs)
+            .unwrap_or(0)
+            .max(1) as usize;
         Self {
             buckets: vec![Bucket::default(); n_buckets],
             bucket_size_secs,
