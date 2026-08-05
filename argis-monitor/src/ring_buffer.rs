@@ -41,7 +41,7 @@ impl RingBuffer {
     /// timestamp anchor for advance().
     pub fn with_bucket_size(total_window_secs: u64, bucket_size_secs: u64, now_secs: u64) -> Self {
         assert!(bucket_size_secs > 0, "bucket_size_secs must be > 0");
-        let n_buckets = (total_window_secs / bucket_size_secs).max(1) as usize;
+        let n_buckets = total_window_secs.div_ceil(bucket_size_secs).max(1) as usize;
         Self {
             buckets: vec![Bucket::default(); n_buckets],
             bucket_size_secs,
@@ -93,13 +93,13 @@ impl RingBuffer {
         let stride = target - self.head_ts;
         let n = self.buckets.len() as u64;
         let step = (stride / self.bucket_size_secs).min(n);
-        for _ in 0..step {
-            // Rotate left by one bucket.
-            let first = self.buckets.remove(0);
-            self.buckets.push(Bucket { success: 0, failure: 0 });
-            // We discard `first` (out of window). For very long strides this
-            // silently drops history; that's the desired behaviour for a ring.
-            let _ = first;
+        if step > 0 {
+            // Rotate in place; remove(0) would make large time jumps O(n^2).
+            let step = step as usize;
+            self.buckets.rotate_left(step);
+            for bucket in self.buckets.iter_mut().rev().take(step) {
+                *bucket = Bucket::default();
+            }
         }
         self.head_ts = target;
     }
