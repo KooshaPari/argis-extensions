@@ -58,22 +58,9 @@ mod opt_seconds_as_duration {
         Ok(match opt {
             None => None,
             Some(Repr::Secs(n)) => Some(Duration::from_secs(n)),
-            Some(Repr::Text(t)) => Some(parse_human(&t).map_err(serde::de::Error::custom)?),
+            Some(Repr::Text(t)) => Some(crate::duration_codec::parse_human(&t).map_err(serde::de::Error::custom)?),
             Some(Repr::None_) => None,
         })
-    }
-    fn parse_human(s: &str) -> Result<Duration, String> {
-        let s = s.trim();
-        let (num, unit) = s.split_at(s.len().saturating_sub(1));
-        let n: u64 = num.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-        let mul = match unit {
-            "s" => 1,
-            "m" => 60,
-            "h" => 3600,
-            "d" => 86_400,
-            _ => return Err(format!("unknown duration unit: {unit}")),
-        };
-        Ok(Duration::from_secs(n * mul))
     }
 }
 
