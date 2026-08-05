@@ -1,78 +1,62 @@
-//! `Diagnostic` impls for `AppError` variants using the `miette` crate.
+//! Machine-readable diagnostics for the canonical [`crate::AppError`] API.
 //!
-//! Per v23-T4 (L41): a `Diagnostic` is a machine-readable error description
-//! that includes:
-//! - The error message
-//! - A unique error code (e.g., "PHN-CFG-001") for log aggregation
-//! - A help suggestion for the user
-//! - A link to the relevant docs page or ADR
-//!
-//! `Diagnostic` is the *machine* counterpart to `Display` (the human
-//! counterpart). Logs that capture `Diagnostic.code` get auto-aggregated
-//! by severity; the help field is what users see in CLI output.
+//! Each variant has a stable `PHN-*` code for aggregation and a short help
+//! message for CLI consumers. The conversion is exhaustive so new
+//! `AppError` variants cannot silently fall back to an unrelated code.
+
 use crate::AppError;
 use miette::Diagnostic;
 use thiserror::Error;
 
 #[derive(Debug, Error, Diagnostic)]
 pub enum AppDiagnostic {
-    #[error("config error: {message}")]
+    #[error("domain error: {0}")]
     #[diagnostic(
-        code = "PHN-CFG-001",
-        help = "Check that the config file is valid TOML/JSON. See ADR-031 for the Configra canonical path."
+        code = "PHN-DOM-500",
+        help = "Review the operation's business rules and current state."
     )]
-    Config { message: String },
+    Domain(String),
 
-    #[error("validation failed: {field} — {reason}")]
+    #[error("not found: {entity} {id}")]
     #[diagnostic(
-        code = "PHN-VAL-001",
-        help = "Re-read the API docs for the field; the value '{value}' is not in the expected set."
+        code = "PHN-NOT-404",
+        help = "Verify the entity name and identifier, then retry the lookup."
     )]
-    Validation { field: String, reason: String, value: String },
+    NotFound { entity: String, id: String },
 
-    #[error("{resource} with id '{id}' not found")]
+    #[error("conflict: {0}")]
     #[diagnostic(
-        code = "PHN-RES-404",
-        help = "Verify the id is correct. If you have permission to list all {resource}, use the list command."
+        code = "PHN-CON-409",
+        help = "Refresh the resource and retry with the current version."
     )]
-    NotFound { resource: String, id: String },
+    Conflict(String),
 
-    #[error("rate limited; retry after {retry_after_ms}ms")]
+    #[error("validation error: {0}")]
     #[diagnostic(
-        code = "PHN-RL-429",
-        help = "See ADR-046 for the per-service rate limit table. If you need a higher limit, file an issue."
+        code = "PHN-VAL-400",
+        help = "Correct the invalid input according to the API contract."
     )]
-    RateLimited { retry_after_ms: u64 },
+    Validation(String),
 
-    #[error("internal error: {message}")]
+    #[error("storage error: {0}")]
     #[diagnostic(
-        code = "PHN-INT-500",
-        help = "This is a bug; please file an issue at https://github.com/phenotype/pheno-errors/issues with the full error."
+        code = "PHN-STO-500",
+        help = "Check the backing storage service and retry when it is available."
     )]
-    Internal { message: String },
+    Storage(String),
 }
 
 impl From<&AppError> for AppDiagnostic {
-    fn from(e: &AppError) -> Self {
-        match e {
-            AppError::Config(m) => AppDiagnostic::Config { message: m.clone() },
-            AppError::Validation(m) => AppDiagnostic::Validation {
-                field: "unknown".into(),
-                reason: m.clone(),
-                value: "".into(),
-            },
-            AppError::NotFound { resource, id } => AppDiagnostic::NotFound {
-                resource: resource.clone(),
+    fn from(error: &AppError) -> Self {
+        match error {
+            AppError::Domain(message) => Self::Domain(message.clone()),
+            AppError::NotFound { entity, id } => Self::NotFound {
+                entity: entity.clone(),
                 id: id.clone(),
             },
-            AppError::RateLimited { retry_after_ms } => AppDiagnostic::RateLimited {
-                retry_after_ms: *retry_after_ms,
-            },
-            AppError::Internal(m) => AppDiagnostic::Internal { message: m.clone() },
-            // For variants without a diagnostic mapping, fall back to Internal.
-            _ => AppDiagnostic::Internal {
-                message: e.to_string(),
-            },
+            AppError::Conflict(message) => Self::Conflict(message.clone()),
+            AppError::Validation(message) => Self::Validation(message.clone()),
+            AppError::Storage(message) => Self::Storage(message.clone()),
         }
     }
 }
@@ -81,43 +65,34 @@ impl From<&AppError> for AppDiagnostic {
 mod tests {
     use super::*;
 
-    #[test]
-    fn config_diagnostic_has_code() {
-        let e = AppError::Config("bad toml".into());
-        let d: AppDiagnostic = (&e).into();
-        let report = miette::Report::new(d);
-        let s = format!("{report:?}");
-        assert!(s.contains("PHN-CFG-001"));
+    fn report_debug(error: AppError) -> String {
+        let diagnostic = AppDiagnostic::from(&error);
+        format!("{:?}", miette::Report::new(diagnostic))
     }
 
     #[test]
-    fn not_found_diagnostic_includes_resource() {
-        let e = AppError::NotFound {
-            resource: "user".into(),
-            id: "42".into(),
-        };
-        let d: AppDiagnostic = (&e).into();
-        let report = miette::Report::new(d);
-        let s = format!("{report:?}");
-        assert!(s.contains("user"));
-        assert!(s.contains("PHN-RES-404"));
-    }
-
-    #[test]
-    fn all_codes_are_phn_prefixed() {
-        // Compile-time + runtime: ensures all codes share the PHN-* namespace
-        let variants = vec![
-            AppError::Config("x".into()),
-            AppError::Validation("x".into()),
-            AppError::NotFound {
-                resource: "x".into(),
-                id: "x".into(),
-            },
-            AppError::RateLimited { retry_after_ms: 1 },
-            AppError::Internal("x".into()),
+    fn every_canonical_variant_maps_to_a_phn_code() {
+        let cases = [
+            (AppError::domain("bad state"), "PHN-DOM-500"),
+            (AppError::not_found("user", "42"), "PHN-NOT-404"),
+            (AppError::conflict("stale version"), "PHN-CON-409"),
+            (AppError::validation("missing name"), "PHN-VAL-400"),
+            (AppError::storage("database unavailable"), "PHN-STO-500"),
         ];
-        for v in variants {
-            let _d = AppDiagnostic::from(&v); // constructs without panic
+
+        for (error, code) in cases {
+            assert!(
+                report_debug(error).contains(code),
+                "missing diagnostic code {code}"
+            );
         }
+    }
+
+    #[test]
+    fn not_found_diagnostic_preserves_entity_and_id() {
+        let output = report_debug(AppError::not_found("user", "42"));
+        assert!(output.contains("user"));
+        assert!(output.contains("42"));
+        assert!(output.contains("PHN-NOT-404"));
     }
 }
