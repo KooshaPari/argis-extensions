@@ -136,23 +136,10 @@ mod seconds_as_duration {
         enum Repr { Secs(u64), Text(String) }
         match Repr::deserialize(d)? {
             Repr::Secs(n) => Ok(Duration::from_secs(n)),
-            Repr::Text(t) => parse_human(&t).map_err(serde::de::Error::custom),
+            Repr::Text(t) => crate::duration_codec::parse_human(&t).map_err(serde::de::Error::custom),
         }
     }
 
-    fn parse_human(s: &str) -> Result<Duration, String> {
-        let s = s.trim();
-        let (num, unit) = s.split_at(s.len().saturating_sub(1));
-        let n: u64 = num.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
-        let mul = match unit {
-            "s" => 1,
-            "m" => 60,
-            "h" => 3600,
-            "d" => 86_400,
-            _ => return Err(format!("unknown duration unit: {unit}")),
-        };
-        Ok(Duration::from_secs(n * mul))
-    }
 }
 
 
