@@ -167,10 +167,10 @@ async fn ring_buffer_excludes_stale_buckets_from_burn_rate() {
     let (s, _f) = rb.window(3600, 3600);
     assert_eq!(s, 60, "all 60 successes should be in-window over the full 3600s");
 
-    // A trailing 120s window from t=3600 includes the two most-recent
-    // buckets (anchored at t=3480..3600).
+    // A trailing 120s window from t=3600 includes the two recorded
+    // buckets anchored at t=3480 and t=3540.
     let (s, f) = rb.window(120, 3600);
-    assert_eq!(s + f, 3, "trailing 120s window contains 3 buckets (inclusive boundary)");
+    assert_eq!(s + f, 2, "trailing 120s window contains the two latest samples");
 
     // Now jump 30 minutes forward and record. The ring rotates 30 buckets,
     // dropping the first 30 successes. The new record lands at bucket
