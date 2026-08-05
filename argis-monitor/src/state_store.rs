@@ -62,7 +62,7 @@ pub struct StateStore {
 impl StateStore {
     /// Open or create the SQLite file at `path`. Runs the schema migration.
     pub fn open(path: &Path) -> Result<Self, StateStoreError> {
-        if let Some(parent) = path.parent() {
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(path)?;
@@ -143,7 +143,7 @@ impl StateStore {
         let mut stmt = match key_prefix {
             Some(p) => self.conn.prepare(
                 "SELECT id, key, event, severity, burn_rate, threshold, payload_json, fired_at_unix
-                 FROM alert_history WHERE key LIKE ?1 ORDER BY fired_at_unix DESC, id DESC LIMIT ?2"
+                 FROM alert_history WHERE key LIKE ?1 ESCAPE '\\' ORDER BY fired_at_unix DESC, id DESC LIMIT ?2"
             )?,
             None => self.conn.prepare(
                 "SELECT id, key, event, severity, burn_rate, threshold, payload_json, fired_at_unix
@@ -163,7 +163,10 @@ impl StateStore {
             })
         };
         let rows = match key_prefix {
-            Some(p) => stmt.query_map(rusqlite::params![format!("{p}%"), limit], row_map)?,
+            Some(p) => {
+                let escaped = p.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+                stmt.query_map(rusqlite::params![format!("{escaped}%"), limit], row_map)?
+            },
             None => stmt.query_map(rusqlite::params![limit], row_map)?,
         };
         let mut out = Vec::new();
@@ -222,6 +225,10 @@ pub fn parse_state(s: &str, since: u64, last_fired: u64) -> Result<AlertState, S
 
 /// Backward-compatible alias for callers using the previous name.
 pub use parse_state as parse_state_err;
+
+fn escape_like_prefix(prefix: &str) -> String {
+    prefix.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+}
 
 fn flatten(snap: &TrackerSnapshot) -> (&'static str, u64, u64) {
     match &snap.state {
