@@ -171,13 +171,18 @@ pub fn evaluate(
     tracker: &mut AlertStateTracker,
 ) -> Decision {
     let resolve = rule.resolve_threshold.unwrap_or(rule.threshold / 2.0);
-    let now_in_state = tracker.sustained_for;
     match tracker.state {
         AlertState::Ok => {
             if burn >= rule.threshold {
-                tracker.state = AlertState::Pending { since: ts };
-                tracker.sustained_for = Duration::from_secs(0);
-                Decision::None
+                if rule.for_secs.is_zero() {
+                    tracker.state = AlertState::Firing { since: ts, last_fired_at: ts };
+                    let payload = AlertPayload::firing(&rule.name, target, &rule.slo, burn, rule.threshold, ts);
+                    Decision::Fire(payload)
+                } else {
+                    tracker.state = AlertState::Pending { since: ts };
+                    tracker.sustained_for = Duration::from_secs(0);
+                    Decision::None
+                }
             } else {
                 Decision::None
             }
@@ -188,10 +193,11 @@ pub fn evaluate(
                 tracker.sustained_for = Duration::from_secs(0);
                 Decision::None
             } else {
-                // Increment sustained_for; if the new value meets the
-                // `for_secs` threshold, promote to Firing on this same tick.
-                tracker.sustained_for += Duration::from_secs(1);
-                if tracker.sustained_for >= rule.for_secs {
+                // Derive sustained time from the monotonic wall-clock sample,
+                // rather than assuming one second per poll tick.
+                let elapsed = Duration::from_secs(ts.saturating_sub(since));
+                tracker.sustained_for = elapsed;
+                if elapsed >= rule.for_secs {
                     tracker.state = AlertState::Firing { since, last_fired_at: ts };
                     let payload = AlertPayload::firing(&rule.name, target, &rule.slo, burn, rule.threshold, ts);
                     Decision::Fire(payload)
