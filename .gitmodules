@@ -1,0 +1,3 @@
+[submodule "clap-ext"]
+	path = clap-ext
+	url = https://github.com/KooshaPari/clap-ext.git
