@@ -133,6 +133,13 @@ impl Metrics {
         Self { polls_total, poll_errors_total, poll_duration, last_poll_ts, up, burn_rate, slo_target, target_info }
     }
 
+    /// Register static metadata for one configured target.
+    pub fn record_target_info(&self, target: &str) {
+        self.target_info
+            .get_or_create(&InfoLabels { target: target.into(), version: env!("CARGO_PKG_VERSION").into() })
+            .inc();
+    }
+
     pub fn record_sample(&self, s: &Sample) {
         let outcome_str = match s.outcome {
             Outcome::Ok => "ok",
