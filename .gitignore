@@ -101,7 +101,6 @@ security-analysis/
 # Each is owned by KooshaPari as a separate repo, mirrored as a sibling for ergonomic
 # local editing. CI failures and PR rebase conflicts caused by `git submodule foreach`
 # recursing into these without `.gitmodules` entries are prevented by ignoring them.
-clap-ext/
 
 # Deploy workflow (contains sensitive VPS credentials)
 clipr/
