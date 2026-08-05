@@ -39,6 +39,8 @@
 //! CLI usage: see `argis-monitor --help`.
 
 
+mod duration_codec;
+
 pub mod alerts;
 pub mod config;
 pub mod exporter;
