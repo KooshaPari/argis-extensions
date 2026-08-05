@@ -465,6 +465,7 @@ mod tests {
     use super::*;
     use crate::alerts::AlertRule;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
 
     #[test]
     fn burn_rates_use_each_slos_configured_window() {
@@ -496,8 +497,8 @@ mod tests {
         ];
         config.data_dir = Some(dir.clone());
         config.alert_rules = vec![
-            AlertRule { name: "first-rule".into(), slo: "first".into(), threshold: 2.0, ..Default::default() },
-            AlertRule { name: "second-rule".into(), slo: "second".into(), threshold: 2.0, ..Default::default() },
+            AlertRule { name: "first-rule".into(), slo: "first".into(), threshold: 2.0, for_secs: Duration::from_secs(1), ..Default::default() },
+            AlertRule { name: "second-rule".into(), slo: "second".into(), threshold: 2.0, for_secs: Duration::from_secs(1), ..Default::default() },
         ];
         let monitor = Monitor::new(config).expect("valid test monitor");
         let rates = BTreeMap::from([

@@ -195,6 +195,11 @@ pub fn evaluate(
     match tracker.state {
         AlertState::Ok => {
             if burn >= rule.threshold {
+                if rule.for_secs.is_zero() {
+                    tracker.state = AlertState::Firing { since: ts, last_fired_at: ts };
+                    let payload = AlertPayload::firing(&rule.name, target, &rule.slo, burn, rule.threshold, ts);
+                    return Decision::Fire(payload);
+                }
                 tracker.state = AlertState::Pending { since: ts };
                 tracker.sustained_for = Duration::from_secs(0);
                 Decision::None
@@ -221,7 +226,7 @@ pub fn evaluate(
             }
         }
         AlertState::Firing { since, last_fired_at } => {
-            if burn < resolve {
+            if burn <= resolve {
                 let payload = AlertPayload::resolved(&rule.name, target, &rule.slo, burn, resolve, ts);
                 tracker.state = AlertState::Ok;
                 tracker.sustained_for = Duration::from_secs(0);
@@ -295,6 +300,15 @@ mod tests {
     }
 
     #[test]
+    fn zero_duration_fires_on_threshold_crossing() {
+        let rule = AlertRule { name: "r".into(), slo: "s".into(), threshold: 2.0, for_secs: Duration::ZERO, ..Default::default() };
+        let mut t = AlertStateTracker::default();
+
+        assert!(matches!(evaluate(&rule, "gateway", 2.0, 100, &mut t), Decision::Fire(_)));
+        assert_eq!(t.state, AlertState::Firing { since: 100, last_fired_at: 100 });
+    }
+
+    #[test]
     fn pending_resets_when_burn_drops_below_threshold() {
         let rule = AlertRule {
             name: "r".into(),
@@ -363,6 +377,15 @@ mod tests {
             }
             _ => panic!("expected resolve payload"),
         }
+        assert_eq!(t.state, AlertState::Ok);
+    }
+
+    #[test]
+    fn resolve_emits_at_threshold_equality() {
+        let rule = AlertRule { name: "r".into(), slo: "s".into(), threshold: 2.0, resolve_threshold: Some(1.0), ..Default::default() };
+        let mut t = AlertStateTracker { state: AlertState::Firing { since: 100, last_fired_at: 100 }, sustained_for: Duration::ZERO };
+
+        assert!(matches!(evaluate(&rule, "gateway", 1.0, 200, &mut t), Decision::Fire(payload) if payload.severity == Severity::Ok));
         assert_eq!(t.state, AlertState::Ok);
     }
 

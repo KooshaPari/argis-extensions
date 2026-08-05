@@ -139,15 +139,23 @@ fn recurring_active(w: &WindowSpec, now_unix: u64) -> bool {
         Some(d) => d,
         None => return false,
     };
-    // Day filter (empty = every day).
-    if !w.days.is_empty() {
-        let today = Day::from_chrono(dt.weekday());
-        if !w.days.contains(&today) { return false; }
-    }
     let (hh, mm) = (dt.hour(), dt.minute());
     let now_secs = hh * 3600 + mm * 60;
     let start_secs = start_hhmm.0 * 3600 + start_hhmm.1 * 60;
     let end_secs = end_hhmm.0 * 3600 + end_hhmm.1 * 60;
+    // For the post-midnight side of a wrapping window, the window started on
+    // the previous calendar day, so apply the day filter to that day.
+    if !w.days.is_empty() {
+        let window_day = if start_secs > end_secs && now_secs <= end_secs {
+            match dt.date().pred_opt() {
+                Some(date) => Day::from_chrono(date.weekday()),
+                None => return false,
+            }
+        } else {
+            Day::from_chrono(dt.weekday())
+        };
+        if !w.days.contains(&window_day) { return false; }
+    }
     if start_secs <= end_secs {
         now_secs >= start_secs && now_secs <= end_secs
     } else {
@@ -249,6 +257,23 @@ mod tests {
         assert!(is_suppressed(&[w.clone()], "any", "any", unix_from_utc(2026, 7, 6, 23, 0, 0)).is_some());
         // 2026-07-11 Saturday 23:00 -> outside (weekend).
         assert!(is_suppressed(&[w], "any", "any", unix_from_utc(2026, 7, 11, 23, 0, 0)).is_none());
+    }
+
+    #[test]
+    fn midnight_window_day_filter_uses_start_day_after_midnight() {
+        let w = WindowSpec {
+            name: "monday-night".into(),
+            start_time: Some("22:00".into()),
+            end_time: Some("06:00".into()),
+            days: vec![Day::Mon],
+            start_at: None, end_at: None,
+            targets: vec![], rules: vec![],
+            reason: None,
+        };
+        // Tuesday 02:00 belongs to Monday's 22:00-06:00 window.
+        assert!(is_suppressed(&[w.clone()], "any", "any", unix_from_utc(2026, 7, 7, 2, 0, 0)).is_some());
+        // Monday 02:00 belongs to Sunday's window, which is not configured.
+        assert!(is_suppressed(&[w], "any", "any", unix_from_utc(2026, 7, 6, 2, 0, 0)).is_none());
     }
 
     #[test]
