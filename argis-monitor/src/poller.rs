@@ -21,12 +21,23 @@ use crate::slo::{burn_rate, BurnWindow};
 use crate::target::Target;
 use crate::webhook;
 
+/// Per-SLO burn-rate pair returned with a poll outcome.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SLOBurnRates {
+    pub short: f64,
+    pub long: f64,
+}
+
 /// One poll's outcome.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PollOutcome {
     pub sample: Sample,
+    /// Compatibility summary for the last configured SLO. Use
+    /// `burn_rates` when more than one SLO is configured.
     pub burn_short: f64,
     pub burn_long: f64,
+    #[serde(default)]
+    pub burn_rates: HashMap<String, SLOBurnRates>,
     #[serde(default)]
     pub alert_payloads: Vec<crate::alerts::AlertPayload>,
 }
@@ -284,12 +295,14 @@ impl Monitor {
 
         let mut burn_short = 0.0_f64;
         let mut burn_long = 0.0_f64;
+        let mut burn_rates = HashMap::new();
         for slo in &self.inner.config.slos {
             let (s_long, f_long) = tc.long.window(slo.window_secs, ts);
             let bs = burn_rate(s_short, f_short, slo.target);
             let bl = burn_rate(s_long, f_long, slo.target);
             m.record_burn(&format!("{}::{}", target.name, slo.name), BurnWindow::FAST_BURN, bs);
             m.record_burn(&format!("{}::{}", target.name, slo.name), BurnWindow::SLOW_BURN, bl);
+            burn_rates.insert(slo.name.clone(), SLOBurnRates { short: bs, long: bl });
             burn_short = bs;
             burn_long = bl;
         }
@@ -299,7 +312,13 @@ impl Monitor {
         drop(m);
 
         let payloads = self.evaluate_alerts(&target.name, ts).await;
-        Ok(PollOutcome { sample, burn_short, burn_long, alert_payloads: payloads })
+        Ok(PollOutcome {
+            sample,
+            burn_short,
+            burn_long,
+            burn_rates,
+            alert_payloads: payloads,
+        })
     }
 
     /// Evaluate every alert rule against its configured SLO/window. Returns
