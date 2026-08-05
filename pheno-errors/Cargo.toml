@@ -25,4 +25,3 @@ proptest = "1.4"
 [dev-dependencies]
 proptest = "1"
 serde_json = "1"
-tracing-test = "0.2"
