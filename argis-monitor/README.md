@@ -42,7 +42,7 @@ cargo build -p argis-monitor --release
 | `argis_monitor_up` | gauge | `provider` | 1 if last poll succeeded, else 0 |
 | `argis_monitor_burn_rate` | gauge | `slo`, `window` | Current SLO burn rate (multiplier of error budget consumption) |
 | `argis_monitor_slo_target` | gauge | `slo` | Configured SLO target ratio |
-| `argis_monitor_target_info` | info | `target`, `version` | Static info about the target gateway |
+| `argis_monitor_target_info` | info | `target`, `url`, `version` | Static info about each configured target endpoint |
 
 ## Architecture
 

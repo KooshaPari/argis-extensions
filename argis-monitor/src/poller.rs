@@ -129,7 +129,13 @@ impl Monitor {
             .map_err(PollError::Transport)?;
 
         let mut registry = Registry::default();
-        let metrics = Metrics::new(&mut registry, config.first_url());
+        let metrics = Metrics::new(
+            &mut registry,
+            config
+                .targets
+                .iter()
+                .map(|target| (target.name.clone(), target.url.clone())),
+        );
         for slo in &config.slos {
             metrics.record_slo_target(&slo.name, slo.target);
         }

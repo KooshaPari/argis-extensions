@@ -55,7 +55,10 @@ pub struct SloOnlyLabels {
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct InfoLabels {
+    /// Stable target identifier, matching the `provider` label on samples.
     pub target: String,
+    /// Configured endpoint URL for this target.
+    pub url: String,
     pub version: String,
 }
 
@@ -93,7 +96,14 @@ pub struct Metrics {
 }
 
 impl Metrics {
-    pub fn new(registry: &mut Registry, target: &str) -> Self {
+    /// Build the registry and expose static metadata for every configured target.
+    ///
+    /// The target name is the stable join key used by the other metric families;
+    /// the URL is retained as metadata rather than replacing that identifier.
+    pub fn new<I>(registry: &mut Registry, targets: I) -> Self
+    where
+        I: IntoIterator<Item = (String, String)>,
+    {
         let polls_total = Family::<PollLabels, Counter>::default();
         let poll_errors_total = Family::<ErrorLabels, Counter>::default();
         // Histogram bucket boundaries in seconds (f64); we observe `latency.as_secs_f64()`.
@@ -124,11 +134,21 @@ impl Metrics {
             "Configured SLO target as per-mille integer (0.999 -> 999, 0.95 -> 950). Divide by 1000 to get the float target.",
             slo_target.clone(),
         );
-        registry.register("argis_monitor_target_info", "Static info about the target gateway.", target_info.clone());
+        registry.register(
+            "argis_monitor_target_info",
+            "Static info about each configured target endpoint.",
+            target_info.clone(),
+        );
 
-        target_info
-            .get_or_create(&InfoLabels { target: target.into(), version: env!("CARGO_PKG_VERSION").into() })
-            .set(1);
+        for (target, url) in targets {
+            target_info
+                .get_or_create(&InfoLabels {
+                    target,
+                    url,
+                    version: env!("CARGO_PKG_VERSION").into(),
+                })
+                .set(1);
+        }
 
         Self { polls_total, poll_errors_total, poll_duration, last_poll_ts, up, burn_rate, slo_target, target_info }
     }
@@ -144,6 +164,9 @@ impl Metrics {
         }).inc();
 
         let provider = ProviderLabels { provider: s.provider.clone() };
+        // Latency is meaningful for both successful and failed polls. Recording
+        // it before the outcome-specific counters keeps degradation visible.
+        self.poll_duration.get_or_create(&provider).observe(s.latency.as_secs_f64());
 
         if s.outcome == Outcome::Error {
             self.poll_errors_total.get_or_create(&ErrorLabels {
@@ -154,7 +177,6 @@ impl Metrics {
         } else {
             self.up.get_or_create(&provider).set(1);
             self.last_poll_ts.get_or_create(&provider).set(s.timestamp_secs as i64);
-            self.poll_duration.get_or_create(&provider).observe(s.latency.as_secs_f64());
         }
     }
 

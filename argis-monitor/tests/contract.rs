@@ -165,6 +165,52 @@ async fn monitor_polls_multiple_targets_in_isolation() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn target_info_exposes_every_target_name_and_url() {
+    let s1 = MockServer::start().await;
+    let s2 = MockServer::start().await;
+    let cfg = Config {
+        targets: vec![
+            argis_monitor::Target::new("healthy", s1.uri()),
+            argis_monitor::Target::new("broken", s2.uri()),
+        ],
+        ..Config::default()
+    };
+    let monitor = Monitor::new(cfg).unwrap();
+
+    let mut buf = String::new();
+    encode(&mut buf, &monitor.registry()).unwrap();
+    assert!(
+        buf.contains(&format!(r#"target="healthy",url="{}""#, s1.uri())),
+        "healthy target metadata missing:\n{buf}"
+    );
+    assert!(
+        buf.contains(&format!(r#"target="broken",url="{}""#, s2.uri())),
+        "broken target metadata missing:\n{buf}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_poll_latency_is_recorded_in_histogram() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/health"))
+        .respond_with(ResponseTemplate::new(503).set_delay(Duration::from_millis(10)))
+        .mount(&server)
+        .await;
+
+    let monitor = Monitor::new(Config::for_test(server.uri())).unwrap();
+    let outcome = monitor.poll_once().await.unwrap();
+    assert_eq!(outcome.sample.outcome, Outcome::Error);
+
+    let mut buf = String::new();
+    encode(&mut buf, &monitor.registry()).unwrap();
+    assert!(
+        buf.contains(r#"argis_monitor_poll_duration_seconds_count{provider="gateway"} 1"#),
+        "failed poll latency was not observed:\n{buf}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn ring_buffer_excludes_stale_buckets_from_burn_rate() {
     use argis_monitor::RingBuffer;
 
