@@ -78,8 +78,7 @@ impl RingBuffer {
         for (i, b) in self.buckets.iter().enumerate() {
             // bucket age in seconds, from newest (0) to oldest ((len-1)*bucket_size).
             let age = (len - 1 - i as u64) * self.bucket_size_secs;
-            let ts = now_boundary.saturating_sub(age);
-            if ts >= cutoff {
+            if age <= window_secs && now_boundary >= age {
                 success += b.success;
                 failure += b.failure;
             }
@@ -93,13 +92,17 @@ impl RingBuffer {
         let stride = target - self.head_ts;
         let n = self.buckets.len() as u64;
         let step = (stride / self.bucket_size_secs).min(n);
-        for _ in 0..step {
-            // Rotate left by one bucket.
-            let first = self.buckets.remove(0);
-            self.buckets.push(Bucket { success: 0, failure: 0 });
-            // We discard `first` (out of window). For very long strides this
-            // silently drops history; that's the desired behaviour for a ring.
-            let _ = first;
+        if step >= n {
+            self.buckets.fill(Bucket::default());
+        } else {
+            for _ in 0..step {
+                // Rotate left by one bucket.
+                let first = self.buckets.remove(0);
+                self.buckets.push(Bucket { success: 0, failure: 0 });
+                // We discard `first` (out of window). For very long strides this
+                // silently drops history; that's the desired behaviour for a ring.
+                let _ = first;
+            }
         }
         self.head_ts = target;
     }
