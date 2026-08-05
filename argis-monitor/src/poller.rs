@@ -193,6 +193,8 @@ impl Monitor {
             _ = sigterm.recv() => { info!("SIGTERM, exiting"); }
             _ = sigint.recv()  => { info!("SIGINT, exiting");  }
         }
+        // Target loops are infinite; abort them before waiting on shutdown.
+        for h in &handles { h.abort(); }
         for h in handles { let _ = h.await; }
         Ok(())
     }
@@ -262,40 +264,41 @@ impl Monitor {
         tc.short.record(is_success, ts);
         tc.long.record(is_success, ts);
 
-        let short_window = BurnWindow::FAST_BURN.long.as_secs();
-        let long_window = tc.long.bucket_size_secs().max(1) * tc.long.len() as u64;
-        let (s_short, f_short) = tc.short.window(short_window, ts);
-        let (s_long, f_long) = tc.long.window(long_window, ts);
-
         let mut burn_short = 0.0_f64;
         let mut burn_long = 0.0_f64;
+        let mut slo_burns = HashMap::new();
         for slo in &self.inner.config.slos {
+            let (s_short, f_short) = tc.short.window(BurnWindow::FAST_BURN.short.as_secs(), ts);
+            let (s_long, f_long) = tc.long.window(slo.window_secs, ts);
             let bs = burn_rate(s_short, f_short, slo.target);
             let bl = burn_rate(s_long, f_long, slo.target);
             m.record_burn(&format!("{}::{}", target.name, slo.name), BurnWindow::FAST_BURN, bs);
             m.record_burn(&format!("{}::{}", target.name, slo.name), BurnWindow::SLOW_BURN, bl);
+            slo_burns.insert(slo.name.clone(), (bs, bl));
             burn_short = bs;
             burn_long = bl;
         }
+        drop(c);
         drop(m);
 
-        // Evaluate alert rules (separately so the metrics lock is released).
-        let payloads = self.evaluate_alerts(&target.name, burn_short, burn_long, ts).await;
+        // Evaluate alert rules after all shared locks are released.
+        let payloads = self.evaluate_alerts(&target.name, &slo_burns, ts).await;
         Ok(PollOutcome { sample, burn_short, burn_long, alert_payloads: payloads })
     }
 
     /// Evaluate every alert rule against the latest burn rates. Returns the
     /// list of payloads that fired (already delivered via webhooks).
-    async fn evaluate_alerts(&self, target_name: &str, burn_short: f64, burn_long: f64, ts: u64) -> Vec<alerts::AlertPayload> {
+    async fn evaluate_alerts(&self, target_name: &str, slo_burns: &HashMap<String, (f64, f64)>, ts: u64) -> Vec<alerts::AlertPayload> {
         let mut fired = Vec::new();
-        let mut store = self.inner.state_store.lock().await;
         for rule in &self.inner.config.alert_rules {
+            let (burn_short, burn_long) = slo_burns.get(&rule.slo).copied().unwrap_or((0.0, 0.0));
             let burn = match rule.window {
                 Some(w) if w >= crate::slo::BurnWindow::SLOW_BURN.long => burn_long,
                 _ => burn_short,
             };
             let key = format!("{}::{}", target_name, rule.name);
             let snap;
+            let mut fired_meta = None;
             {
                 let mut trackers = self.inner.alert_trackers.lock().await;
                 let tracker = trackers.entry(key.clone()).or_insert_with(AlertStateTracker::default);
@@ -326,6 +329,7 @@ impl Monitor {
                                 last.insert(r.url.clone(), r);
                             }
                         }
+                        fired_meta = Some((payload.rule.clone(), payload.severity, payload.burn_rate, payload.threshold, payload.fired_at_unix));
                         fired.push(payload);
                     }
                     Decision::None => {}
@@ -335,9 +339,8 @@ impl Monitor {
                     sustained_secs: tracker.sustained_for.as_secs(),
                 };
             }
-            // Capture fired-meta for the alert_history insert below.
-            let fired_meta = fired.last().map(|p| (p.rule.clone(), p.severity, p.burn_rate, p.threshold, p.fired_at_unix));
-            // Persist outside the trackers lock to avoid contention.
+            // Persist outside the trackers lock and webhook await.
+            let mut store = self.inner.state_store.lock().await;
             if let Some(s) = store.as_mut() {
                 if let Err(e) = s.save(&key, &snap) {
                     tracing::warn!(target = %target_name, rule = %rule.name, error = %e, "state store save failed");
