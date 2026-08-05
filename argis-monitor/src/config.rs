@@ -27,6 +27,7 @@ pub struct SLO {
 
 fn default_slo_window_secs() -> u64 { 30 * 24 * 3600 }
 fn default_slo_target() -> f64 { 0.999 }
+fn default_slos() -> Vec<SLO> { vec![SLO::default()] }
 
 impl Default for SLO {
     fn default() -> Self {
@@ -56,7 +57,7 @@ pub struct Config {
     #[serde(default = "default_exporter_addr")]
     pub exporter_addr: String,
     /// SLOs to track. Defaults to a single "three nines" chat-completions SLO.
-    #[serde(default)]
+    #[serde(default = "default_slos")]
     pub slos: Vec<SLO>,
     /// Alert rules evaluated each tick. Empty by default (alerts off).
     #[serde(default)]
@@ -148,6 +149,34 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Validate values that would otherwise make a monitor produce invalid
+    /// SLO metrics or panic while constructing an async interval.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.poll_interval.is_zero() {
+            return Err("poll_interval must be greater than zero".into());
+        }
+        if self.push_url.is_some() && self.push_interval_secs == 0 {
+            return Err("push_interval_secs must be greater than zero when push_url is set".into());
+        }
+        for target in &self.targets {
+            if target.poll_interval.is_some_and(|interval| interval.is_zero()) {
+                return Err(format!(
+                    "target {} poll_interval must be greater than zero",
+                    target.name
+                ));
+            }
+        }
+        for slo in &self.slos {
+            if !slo.target.is_finite() || !(0.0..=1.0).contains(&slo.target) {
+                return Err(format!(
+                    "SLO {} target must be finite and between 0.0 and 1.0",
+                    slo.name
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Convenience: the first target's URL (or empty string if no targets).
     pub fn first_url(&self) -> &str {
         self.targets.first().map(|t| t.url.as_str()).unwrap_or("")
@@ -192,6 +221,57 @@ mod tests {
         assert!(!rendered.contains("bearer-secret"));
         assert!(!rendered.contains("aws-secret"));
         assert!(rendered.contains("<redacted>"));
+    }
+
+    #[test]
+    fn omitted_slos_use_the_three_nines_default() {
+        let config: Config = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(config.slos, vec![SLO::default()]);
+    }
+
+    #[test]
+    fn validation_rejects_invalid_slo_targets() {
+        for target in [-0.01, 1.01, f64::NAN, f64::INFINITY] {
+            let config = Config {
+                slos: vec![SLO { target, ..SLO::default() }],
+                ..Config::default()
+            };
+            assert!(
+                config.validate().is_err(),
+                "target {target} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn validation_rejects_zero_intervals() {
+        let mut config = Config::default();
+        config.poll_interval = Duration::ZERO;
+        assert!(config.validate().is_err());
+
+        let mut config = Config::default();
+        config.push_url = Some("http://pushgateway".into());
+        config.push_interval_secs = 0;
+        assert!(config.validate().is_err());
+
+        let mut config = Config::default();
+        config.targets[0].poll_interval = Some(Duration::ZERO);
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn monitor_rejects_invalid_slo_target() {
+        let config = Config {
+            slos: vec![SLO {
+                target: 1.01,
+                ..SLO::default()
+            }],
+            ..Config::default()
+        };
+        assert!(matches!(
+            crate::poller::Monitor::new(config),
+            Err(crate::poller::PollError::InvalidConfig(_))
+        ));
     }
 }
 

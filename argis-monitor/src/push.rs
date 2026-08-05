@@ -70,6 +70,10 @@ pub async fn run_pusher(
     job_name: String,
     instance_label: String,
 ) {
+    if interval.is_zero() {
+        error!(%url, "refusing to start Pushgateway pusher with zero interval");
+        return;
+    }
     info!(%url, interval_secs = interval.as_secs(), %job_name, %instance_label, "argis-monitor pusher starting");
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -130,5 +134,17 @@ mod tests {
         let mut buf = String::new();
         encode(&mut buf, &reg).unwrap();
         assert!(buf.contains("test_counter_total 0"));
+    }
+
+    #[tokio::test]
+    async fn run_pusher_returns_for_zero_interval() {
+        run_pusher(
+            "http://pushgateway".into(),
+            Arc::new(Registry::default()),
+            Duration::ZERO,
+            "job".into(),
+            "instance".into(),
+        )
+        .await;
     }
 }

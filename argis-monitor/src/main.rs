@@ -108,6 +108,8 @@ fn load_config(path: Option<&std::path::Path>) -> anyhow::Result<Config> {
         let bytes = std::fs::read(p)?;
         let cfg: Config = serde_yaml::from_slice(&bytes)
             .map_err(|e| anyhow::anyhow!("invalid yaml in {}: {e}", p.display()))?;
+        cfg.validate()
+            .map_err(|e| anyhow::anyhow!("invalid config in {}: {e}", p.display()))?;
         Ok(cfg)
     } else {
         Ok(Config::default())
