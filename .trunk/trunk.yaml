@@ -27,15 +27,6 @@ lint:
     - yamllint
 
   definitions:
-    - name: actionlint
-      commands:
-        - name: actionlint
-          run: actionlint ${target}
-          success_codes: [0]
-          output: actionlint
-          direct_configs:
-            - .github/workflows/*.yml
-
     - name: black
       commands:
         - name: black-check
@@ -76,12 +67,6 @@ lint:
           run: mypy --ignore-missing-imports ${target}
           success_codes: [0]
           output: mypy
-
-    - name: prettier
-      formatter: true
-      direct_configs:
-        - .prettierrc
-        - prettier.config.*
 
     - name: ruff
       commands:
