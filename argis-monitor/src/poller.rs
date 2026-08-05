@@ -254,7 +254,6 @@ impl Monitor {
             burn_short = bs;
             burn_long = bl;
         }
-        drop(m);
 
         // Release shared state before alert evaluation and webhook I/O.
         drop(c);
