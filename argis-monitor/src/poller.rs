@@ -95,13 +95,13 @@ impl Monitor {
                     target.name
                 )));
             }
-            if target.poll_interval.is_some_and(Duration::is_zero) {
+            if target.poll_interval.is_some_and(|d| d.is_zero()) {
                 return Err(PollError::InvalidConfig(format!(
                     "poll interval for target {} must be greater than zero",
                     target.name
                 )));
             }
-            if target.poll_timeout.is_some_and(Duration::is_zero) {
+            if target.poll_timeout.is_some_and(|d| d.is_zero()) {
                 return Err(PollError::InvalidConfig(format!(
                     "poll timeout for target {} must be greater than zero",
                     target.name
