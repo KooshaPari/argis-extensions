@@ -116,8 +116,10 @@ fn init_tracing() {
 /// config came from the CLI (no config file), so it never overrides a
 /// YAML-defined target list silently.
 fn apply_cli_targets(cfg: &mut Config, target: Option<String>, targets: &[String]) {
-    if let Some(t) = target {
+    if target.is_some() || !targets.is_empty() {
         cfg.targets.clear();
+    }
+    if let Some(t) = target {
         cfg.targets.push(argis_monitor::Target::new("gateway", t));
     }
     for t in targets {
