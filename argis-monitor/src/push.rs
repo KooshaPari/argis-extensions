@@ -11,7 +11,7 @@
 //!   - Forwarding to a downstream TSDB when direct scraping isn't possible
 //!
 //! The push is best-effort: failures are logged with `warn!` and the task
-//! continues. Backoff is the standard retry pattern (1 retry after 5s).
+//! continues; the next scheduled tick retries a failed push.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,20 +25,28 @@ use tracing::{error, info, warn};
 pub enum PushError {
     #[error("HTTP transport: {0}")]
     Transport(#[from] reqwest::Error),
-    #[error("invalid URL: {0}")]
-    InvalidUrl(String),
+    #[error("metrics encoding: {0}")]
+    Encode(String),
     #[error("non-2xx response: {status}")]
     NonSuccess { status: u16 },
 }
 
 /// Push the registry's contents to `url`. Returns the HTTP status on success.
 pub async fn push_to(url: &str, registry: &Registry) -> Result<u16, PushError> {
-    let mut buf = String::new();
-    encode(&mut buf, registry).map_err(|e| PushError::InvalidUrl(e.to_string()))?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
         .map_err(PushError::Transport)?;
+    push_to_with_client(&client, url, registry).await
+}
+
+async fn push_to_with_client(
+    client: &reqwest::Client,
+    url: &str,
+    registry: &Registry,
+) -> Result<u16, PushError> {
+    let mut buf = String::new();
+    encode(&mut buf, registry).map_err(|e| PushError::Encode(e.to_string()))?;
     let resp = client
         .post(url)
         .header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -53,7 +61,6 @@ pub async fn push_to(url: &str, registry: &Registry) -> Result<u16, PushError> {
         Err(PushError::NonSuccess { status })
     }
 }
-
 /// Background task that pushes every `interval` until cancelled.
 pub async fn run_pusher(
     url: String,
@@ -63,6 +70,13 @@ pub async fn run_pusher(
     instance_label: String,
 ) {
     info!(%url, interval_secs = interval.as_secs(), %job_name, %instance_label, "argis-monitor pusher starting");
+    let client = match reqwest::Client::builder().timeout(Duration::from_secs(10)).build() {
+        Ok(client) => client,
+        Err(e) => {
+            error!(error = %e, "failed to build push HTTP client");
+            return;
+        }
+    };
     let mut ticker = tokio::time::interval(interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Pushgateway URL format: {base}/metrics/job/{job}/instance/{instance}
@@ -74,7 +88,7 @@ pub async fn run_pusher(
     );
     loop {
         ticker.tick().await;
-        match push_to(&push_url, &registry).await {
+        match push_to_with_client(&client, &push_url, &registry).await {
             Ok(status) => info!(%push_url, status, "pushed"),
             Err(e) => warn!(error = %e, %push_url, "push failed; will retry next tick"),
         }
