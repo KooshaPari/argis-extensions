@@ -79,6 +79,18 @@ impl Monitor {
         if config.targets.is_empty() {
             return Err(PollError::NoTargets);
         }
+        if config.slos.iter().any(|s| {
+            s.window_secs == 0 || !s.target.is_finite() || !(0.0..=1.0).contains(&s.target)
+        }) {
+            return Err(PollError::InvalidConfig(
+                "SLO window_secs must be > 0 and target must be finite in [0, 1]".into(),
+            ));
+        }
+        if config.push_url.is_some() && config.push_interval_secs == 0 {
+            return Err(PollError::InvalidConfig(
+                "push_interval_secs must be > 0 when push_url is configured".into(),
+            ));
+        }
         let mut headers = reqwest::header::HeaderMap::new();
         if let Some(tok) = &config.bearer_token {
             headers.insert(
