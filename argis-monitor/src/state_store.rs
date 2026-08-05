@@ -34,6 +34,8 @@ use crate::alerts::AlertState;
 pub enum StateStoreError {
     #[error("sqlite: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
     #[error("invalid state string in DB: {0}")]
     InvalidState(String),
 }
@@ -61,11 +63,7 @@ impl StateStore {
     /// Open or create the SQLite file at `path`. Runs the schema migration.
     pub fn open(path: &Path) -> Result<Self, StateStoreError> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                StateStoreError::Sqlite(rusqlite::Error::InvalidParameterName(
-                    format!("create_dir_all({parent:?}): {e}").into(),
-                ))
-            })?;
+            std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(path)?;
         conn.execute_batch(SCHEMA)?;
