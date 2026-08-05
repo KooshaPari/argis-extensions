@@ -1,0 +1,38 @@
+name: Provision Trunk linter dependencies
+description: Install the pinned binaries required by the repository Trunk configuration
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        node-version: 22.14.0
+
+    - name: Install Prettier
+      shell: bash
+      run: npm install --global --no-audit --no-fund prettier@2.6.2
+
+    - name: Install actionlint
+      shell: bash
+      run: |
+        set -euo pipefail
+        version=1.6.9
+        archive="actionlint_${version}_linux_amd64.tar.gz"
+        archive_path="${RUNNER_TEMP}/${archive}"
+        curl --fail --location --silent --show-error \
+          "https://github.com/rhysd/actionlint/releases/download/v${version}/${archive}" \
+          --output "${archive_path}"
+        echo "ff1ff2ca3f331886e5d9b08e5128d927e7fa46a8c0bf71f544fa03d1e43a33ac  ${archive_path}" \
+          | sha256sum --check --strict
+        tar --extract --gzip --file "${archive_path}" --directory "${RUNNER_TEMP}"
+        install -d "${HOME}/.local/bin"
+        install -m 0755 "${RUNNER_TEMP}/actionlint" "${HOME}/.local/bin/actionlint"
+        echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+    - name: Verify pinned linter binaries
+      shell: bash
+      run: |
+        set -euo pipefail
+        test "$(prettier --version)" = "2.6.2"
+        test "$(actionlint --version)" = "1.6.9"
