@@ -286,40 +286,46 @@ impl Monitor {
     /// list of payloads that fired (already delivered via webhooks).
     async fn evaluate_alerts(&self, target_name: &str, burn_short: f64, burn_long: f64, ts: u64) -> Vec<alerts::AlertPayload> {
         let mut fired = Vec::new();
-        let mut store = self.inner.state_store.lock().await;
+        let mut to_save = Vec::with_capacity(self.inner.config.alert_rules.len());
+
         for rule in &self.inner.config.alert_rules {
             let burn = match rule.window {
                 Some(w) if w >= crate::slo::BurnWindow::SLOW_BURN.long => burn_long,
                 _ => burn_short,
             };
             let key = format!("{}::{}", target_name, rule.name);
-            let snap;
-            {
+
+            // Advance the state machine while holding only the tracker lock.
+            // Webhook delivery must not block other target evaluations.
+            let (decision, snap) = {
                 let mut trackers = self.inner.alert_trackers.lock().await;
                 let tracker = trackers.entry(key.clone()).or_insert_with(AlertStateTracker::default);
-                match alerts::evaluate(rule, target_name, burn, ts, tracker) {
-                    Decision::Fire(payload) => {
-                        // Deliver before persistence so the post-fire
-                        // tracker state (which reflects the cooldown
-                        // anchor) is what we save.
-                        let reports = webhook::deliver_all(&self.inner.http, &rule.webhooks, &payload).await;
-                        let mut last = self.inner.last_delivery.lock().await;
-                        for r in reports {
-                            last.insert(r.url.clone(), r);
-                        }
-                        fired.push(payload);
-                    }
-                    Decision::None => {}
-                }
-                snap = TrackerSnapshot {
+                let decision = alerts::evaluate(rule, target_name, burn, ts, tracker);
+                let snap = TrackerSnapshot {
                     state: tracker.state.clone(),
                     sustained_secs: tracker.sustained_for.as_secs(),
                 };
+                (decision, snap)
+            };
+
+            if let Decision::Fire(payload) = decision {
+                let reports = webhook::deliver_all(&self.inner.http, &rule.webhooks, &payload).await;
+                let mut last = self.inner.last_delivery.lock().await;
+                for r in reports {
+                    last.insert(r.url.clone(), r);
+                }
+                fired.push(payload);
             }
-            // Persist outside the trackers lock to avoid contention.
-            if let Some(s) = store.as_mut() {
+            to_save.push((key, snap));
+        }
+
+        // Persist snapshots only after all alert evaluation and delivery.
+        // The store lock is never held across network I/O.
+        let mut store = self.inner.state_store.lock().await;
+        if let Some(s) = store.as_mut() {
+            for (key, snap) in to_save {
                 if let Err(e) = s.save(&key, &snap) {
-                    tracing::warn!(target = %target_name, rule = %rule.name, error = %e, "state store save failed");
+                    tracing::warn!(target = %target_name, error = %e, "state store save failed");
                 }
             }
         }
