@@ -53,7 +53,10 @@ async fn deliver_one(http: &reqwest::Client, target: &WebhookTarget, payload: &A
             Ok(r) => r,
             Err(e) => { last_err = Some(format!("build: {e}")); continue; }
         };
-        // apply headers
+        // The polling client may carry an upstream bearer token as a
+        // default header. Never forward that credential to webhook targets.
+        req.headers_mut().remove(reqwest::header::AUTHORIZATION);
+        // apply caller-supplied webhook headers
         let headers = req.headers_mut();
         for (k, v) in &target.headers {
             if let Ok(name) = reqwest::header::HeaderName::from_bytes(k.as_bytes()) {
