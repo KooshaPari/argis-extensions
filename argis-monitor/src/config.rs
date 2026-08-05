@@ -27,6 +27,8 @@ pub struct SLO {
 fn default_slo_window_secs() -> u64 { 30 * 24 * 3600 }
 fn default_slo_target() -> f64 { 0.999 }
 
+fn default_slos() -> Vec<SLO> { vec![SLO::default()] }
+
 impl Default for SLO {
     fn default() -> Self {
         Self {
@@ -55,7 +57,7 @@ pub struct Config {
     #[serde(default = "default_exporter_addr")]
     pub exporter_addr: String,
     /// SLOs to track. Defaults to a single "three nines" chat-completions SLO.
-    #[serde(default)]
+    #[serde(default = "default_slos")]
     pub slos: Vec<SLO>,
     /// Optional bearer token sent on every poll. Use for protected gateways.
     #[serde(default)]
