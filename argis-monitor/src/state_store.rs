@@ -60,7 +60,7 @@ pub struct StateStore {
 impl StateStore {
     /// Open or create the SQLite file at `path`. Runs the schema migration.
     pub fn open(path: &Path) -> Result<Self, StateStoreError> {
-        if let Some(parent) = path.parent() {
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent).map_err(|e| {
                 StateStoreError::Sqlite(rusqlite::Error::InvalidParameterName(
                     format!("create_dir_all({parent:?}): {e}").into(),
