@@ -2,7 +2,7 @@
 //! the shared `Metrics` registry, and feeds the `RingBuffer` per target for
 //! proper SLO multi-window burn-rate computation.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -28,10 +28,43 @@ use crate::webhook;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PollOutcome {
     pub sample: Sample,
+    /// Burn rates for every configured SLO, keyed by its stable name.
+    ///
+    /// The scalar fields below remain as compatibility aliases for the first
+    /// configured SLO; callers that track more than one SLO must use this map.
+    #[serde(default)]
+    pub burn_rates: BTreeMap<String, BurnRates>,
     pub burn_short: f64,
     pub burn_long: f64,
     #[serde(default)]
     pub alert_payloads: Vec<crate::alerts::AlertPayload>,
+}
+
+/// Short- and long-window burn rates for one SLO.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct BurnRates {
+    pub short: f64,
+    pub long: f64,
+}
+
+fn compute_burn_rates(
+    slos: &[SLO],
+    (short_success, short_failure): (u64, u64),
+    long: &RingBuffer,
+    ts: u64,
+) -> BTreeMap<String, BurnRates> {
+    slos.iter()
+        .map(|slo| {
+            let (long_success, long_failure) = long.window(slo.window_secs, ts);
+            (
+                slo.name.clone(),
+                BurnRates {
+                    short: burn_rate(short_success, short_failure, slo.target),
+                    long: burn_rate(long_success, long_failure, slo.target),
+                },
+            )
+        })
+        .collect()
 }
 
 /// Errors the poller can encounter.
@@ -291,39 +324,45 @@ impl Monitor {
         tc.long.record(is_success, ts);
 
         let short_window = BurnWindow::FAST_BURN.long.as_secs();
-        let long_window = tc.long.bucket_size_secs().max(1) * tc.long.len() as u64;
         let (s_short, f_short) = tc.short.window(short_window, ts);
-        let (s_long, f_long) = tc.long.window(long_window, ts);
+        let burn_rates = compute_burn_rates(
+            &self.inner.config.slos,
+            (s_short, f_short),
+            &tc.long,
+            ts,
+        );
         drop(c);
 
-        let mut burn_short = 0.0_f64;
-        let mut burn_long = 0.0_f64;
-        for slo in &self.inner.config.slos {
-            let bs = burn_rate(s_short, f_short, slo.target);
-            let bl = burn_rate(s_long, f_long, slo.target);
-            m.record_burn(&format!("{}::{}", target.name, slo.name), BurnWindow::FAST_BURN, bs);
-            m.record_burn(&format!("{}::{}", target.name, slo.name), BurnWindow::SLOW_BURN, bl);
-            burn_short = bs;
-            burn_long = bl;
+        let (burn_short, burn_long) = self.inner.config.slos.first()
+            .and_then(|slo| burn_rates.get(&slo.name).map(|rates| (rates.short, rates.long)))
+            .unwrap_or((0.0, 0.0));
+        for (slo_name, rates) in &burn_rates {
+            m.record_burn(&format!("{}::{}", target.name, slo_name), BurnWindow::FAST_BURN, rates.short);
+            m.record_burn(&format!("{}::{}", target.name, slo_name), BurnWindow::SLOW_BURN, rates.long);
         }
         drop(m);
 
         // Evaluate alert rules (separately so the metrics lock is released).
-        let payloads = self.evaluate_alerts(&target.name, burn_short, burn_long, ts).await;
-        Ok(PollOutcome { sample, burn_short, burn_long, alert_payloads: payloads })
+        let payloads = self.evaluate_alerts(&target.name, &burn_rates, ts).await;
+        Ok(PollOutcome { sample, burn_rates, burn_short, burn_long, alert_payloads: payloads })
     }
 
     /// Evaluate every alert rule against the latest burn rates. Returns the
     /// list of payloads that fired (already delivered via webhooks).
-    async fn evaluate_alerts(&self, target_name: &str, burn_short: f64, burn_long: f64, ts: u64) -> Vec<alerts::AlertPayload> {
+    async fn evaluate_alerts(&self, target_name: &str, burn_rates: &BTreeMap<String, BurnRates>, ts: u64) -> Vec<alerts::AlertPayload> {
         let mut fired = Vec::new();
         for rule in &self.inner.config.alert_rules {
+            let Some(rates) = burn_rates.get(&rule.slo) else {
+                warn!(target = %target_name, rule = %rule.name, slo = %rule.slo, "alert rule references an unconfigured SLO");
+                continue;
+            };
             let burn = match rule.window {
-                Some(w) if w >= crate::slo::BurnWindow::SLOW_BURN.long => burn_long,
-                _ => burn_short,
+                Some(w) if w >= crate::slo::BurnWindow::SLOW_BURN.long => rates.long,
+                _ => rates.short,
             };
             let key = format!("{}::{}", target_name, rule.name);
             let snap;
+            let mut fired_payload = None;
             {
                 let mut trackers = self.inner.alert_trackers.lock().await;
                 let tracker = trackers.entry(key.clone()).or_insert_with(AlertStateTracker::default);
@@ -354,6 +393,7 @@ impl Monitor {
                                 last.insert(r.url.clone(), r);
                             }
                         }
+                        fired_payload = Some(payload.clone());
                         fired.push(payload);
                     }
                     Decision::None => {}
@@ -364,7 +404,7 @@ impl Monitor {
                 };
             }
             // Capture fired-meta for the alert_history insert below.
-            let fired_meta = fired.last().map(|p| (p.rule.clone(), p.severity, p.burn_rate, p.threshold, p.fired_at_unix));
+            let fired_meta = fired_payload.as_ref().map(|p| (p.rule.clone(), p.severity, p.burn_rate, p.threshold, p.fired_at_unix));
             // Persist outside the trackers lock to avoid contention.
             let mut store = self.inner.state_store.lock().await;
             if let Some(s) = store.as_mut() {
@@ -415,4 +455,66 @@ impl Monitor {
 impl SLO {
     pub fn with_window_secs(mut self, secs: u64) -> Self { self.window_secs = secs; self }
     pub fn with_target(mut self, target: f64) -> Self { self.target = target; self }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::alerts::AlertRule;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    #[test]
+    fn burn_rates_use_each_slos_configured_window() {
+        let mut ring = RingBuffer::with_bucket_size(3_600, 60, 0);
+        ring.record(false, 0);
+        ring.record(true, 300);
+        let slos = vec![
+            SLO { name: "short".into(), window_secs: 60, target: 0.5 },
+            SLO { name: "long".into(), window_secs: 600, target: 0.5 },
+        ];
+
+        let rates = compute_burn_rates(&slos, (1, 0), &ring, 300);
+        assert_eq!(rates["short"].long, 0.0, "the short SLO must exclude the old failure");
+        assert_eq!(rates["long"].long, 1.0, "the long SLO must include both buckets");
+    }
+
+    #[tokio::test]
+    async fn alert_history_uses_current_rule_and_slo_payload() {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "argis-monitor-poller-{}-{}",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::SeqCst),
+        ));
+        let mut config = Config::for_test("http://127.0.0.1:1");
+        config.slos = vec![
+            SLO { name: "first".into(), window_secs: 60, target: 0.999 },
+            SLO { name: "second".into(), window_secs: 60, target: 0.999 },
+        ];
+        config.data_dir = Some(dir.clone());
+        config.alert_rules = vec![
+            AlertRule { name: "first-rule".into(), slo: "first".into(), threshold: 2.0, ..Default::default() },
+            AlertRule { name: "second-rule".into(), slo: "second".into(), threshold: 2.0, ..Default::default() },
+        ];
+        let monitor = Monitor::new(config).expect("valid test monitor");
+        let rates = BTreeMap::from([
+            ("first".into(), BurnRates { short: 3.0, long: 3.0 }),
+            ("second".into(), BurnRates { short: 0.0, long: 0.0 }),
+        ]);
+
+        // First tick enters Pending; the second tick fires only first-rule.
+        monitor.evaluate_alerts("gateway", &rates, 100).await;
+        let fired = monitor.evaluate_alerts("gateway", &rates, 101).await;
+        assert_eq!(fired.len(), 1);
+        assert_eq!(fired[0].rule, "first-rule");
+        assert_eq!(fired[0].slo, "first");
+
+        drop(monitor);
+        let store = StateStore::open(&dir.join("alert_state.sqlite")).expect("open test state store");
+        let history = store.list_history(None, 10).expect("read test alert history");
+        assert_eq!(history.len(), 1, "a non-firing rule must not reuse a prior payload");
+        assert_eq!(history[0].key, "gateway::first-rule");
+        assert!(history[0].payload_json.contains("first-rule"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
