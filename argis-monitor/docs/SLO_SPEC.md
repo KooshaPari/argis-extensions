@@ -21,22 +21,11 @@ Two windows are tracked per SLO:
 | Short (5m / 30m) | Fast burn (likely acute incident) | burn > 14.4 |
 | Long (1h / 6h) | Slow burn (likely regression) | burn > 14.4 |
 
-The SRE recipe alerts when **both** the short and long windows exceed 14.4x burn simultaneously. The monitor records both windows as separate gauges (`argis_monitor_burn_rate{window="short"}` and `{window="long"}`); the alerting rule lives in the Prometheus config (out of scope for this crate).
+The SRE recipe can be expressed through the monitor's `AlertRule` configuration. Each rule selects an SLO and optional trailing window; the evaluator emits webhook payloads as the rule moves through `Pending`, `Firing`, and `Ok`.
 
-## Implementation note: simple counter, not ring buffer
+## Implementation note: ring-buffer windows
 
-The first slice uses a single `SlidingCounters` struct with four `u64` fields. Both "short" and "long" are cumulative-since-startup approximations. This is **wrong** for windows longer than ~1 hour under realistic traffic; the values drift toward the cumulative error rate, not the trailing-window error rate.
-
-The fix is a per-window ring buffer of timestamped `(success, failure)` pairs. The interface is already prepared for this:
-
-```rust
-struct SlidingCounters {
-    short_success: u64,  short_failure: u64,
-    long_success: u64,   long_failure: u64,
-}
-```
-
-The next slice replaces these four fields with two `RingBuffer<Bucket>` (one per window) where each `Bucket` covers a coarse-grained time slice. The public `PollOutcome { burn_short, burn_long }` stays stable.
+The implementation uses a fixed-size `RingBuffer` of timestamped `(success, failure)` buckets. Queries include the newest bucket and exclude buckets older than the requested cutoff, so alert evaluation uses trailing-window error rates rather than cumulative-since-startup counters.
 
 ## Tests
 
