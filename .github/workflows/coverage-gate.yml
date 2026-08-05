@@ -7,17 +7,41 @@ on:
 jobs:
   coverage:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crate:
+          - pheno-config
+          - pheno-errors
+          - pheno-otel
+          - pheno-port-adapter
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo install cargo-llvm-cov --quiet
-      - run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+      - name: Generate LCOV for ${{ matrix.crate }}
+        run: cargo llvm-cov --manifest-path "${{ matrix.crate }}/Cargo.toml" --lcov --output-path "lcov-${{ matrix.crate }}.info"
       - name: Check 80% threshold
         run: |
-          pct=$(cargo llvm-cov --workspace --no-cfg-coverage 2>/dev/null | grep -oE 'Coverage [0-9.]+%' | head -1 | grep -oE '[0-9.]+')
+          # Parse the LCOV report generated above. `cargo llvm-cov` emits a
+          # table/TOTAL summary, not a stable `Coverage N%` line; LF/LH are
+          # the supported LCOV line totals and remain valid across versions.
+          pct=$(awk -F: '
+            /^LF:/ { lf += $2; have_lf = 1 }
+            /^LH:/ { lh += $2; have_lh = 1 }
+            END {
+              if (!have_lf || !have_lh || lf <= 0 || lh < 0 || lh > lf) {
+                exit 1
+              }
+              printf "%.2f", (100 * lh) / lf
+            }
+          ' "lcov-${{ matrix.crate }}.info") || {
+            echo "::error::Invalid or missing LCOV line totals for ${{ matrix.crate }}"
+            exit 1
+          }
           echo "coverage=$pct%"
           awk -v p="$pct" 'BEGIN { if (p+0 < 80) { print "FAIL: " p "% < 80%"; exit 1 } else { print "PASS: " p "% >= 80%" } }'
       - uses: actions/upload-artifact@v4
         with:
-          name: lcov
-          path: lcov.info
+          name: lcov-${{ matrix.crate }}
+          path: lcov-${{ matrix.crate }}.info
