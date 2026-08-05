@@ -172,6 +172,13 @@ impl Metrics {
         let scaled = (target * 1_000.0).round() as i64;
         self.slo_target.get_or_create(&SloOnlyLabels { slo: slo.into() }).set(scaled);
     }
+
+    /// Register static metadata for an additional configured target.
+    pub fn record_target_info(&self, target: &str) {
+        self.target_info
+            .get_or_create(&InfoLabels { target: target.into(), version: env!("CARGO_PKG_VERSION").into() })
+            .inc();
+    }
 }
 
 fn window_label(w: BurnWindow) -> String {
