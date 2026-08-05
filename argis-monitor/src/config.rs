@@ -202,6 +202,8 @@ impl Config {
     /// Convenience for tests: a single-target Config pointing at `target`.
     #[doc(hidden)]
     pub fn for_test(target: impl Into<String>) -> Self {
-        Self::default().with_target_url(target)
+        let mut cfg = Self::default().with_target_url(target);
+        cfg.data_dir = None;
+        cfg
     }
 }
