@@ -8,6 +8,7 @@
 //! for the in-process substrate; if memory ever becomes a concern, swap
 //! to compressed bitmaps (see docs/SLO_SPEC.md).
 
+use std::collections::VecDeque;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -23,7 +24,7 @@ impl Bucket {
 /// A fixed-size ring of buckets, one per `bucket_size_secs`. The ring advances
 /// automatically on `record()` based on the wall-clock timestamp.
 pub struct RingBuffer {
-    buckets: Vec<Bucket>,
+    buckets: VecDeque<Bucket>,
     bucket_size_secs: u64,
     /// The unix-second timestamp of the most recent bucket boundary.
     head_ts: u64,
@@ -43,7 +44,7 @@ impl RingBuffer {
         assert!(bucket_size_secs > 0, "bucket_size_secs must be > 0");
         let n_buckets = (total_window_secs / bucket_size_secs).max(1) as usize;
         Self {
-            buckets: vec![Bucket::default(); n_buckets],
+            buckets: std::iter::repeat_n(Bucket::default(), n_buckets).collect(),
             bucket_size_secs,
             head_ts: Self::boundary_for(bucket_size_secs, now_secs),
         }
@@ -68,20 +69,20 @@ impl RingBuffer {
 
     /// Compute `(successes, failures)` over the trailing `window_secs`.
     /// Buckets older than the window are excluded; the most-recent bucket
-    /// is included even if partially filled.
+    /// is included even if partially filled. Callers must provide a timestamp
+    /// that is monotonic with prior `record()` calls.
     pub fn window(&self, window_secs: u64, now_secs: u64) -> (u64, u64) {
         let now_boundary = self.boundary(now_secs);
         let cutoff = now_boundary.saturating_sub(window_secs);
         let mut success = 0u64;
         let mut failure = 0u64;
-        let len = self.buckets.len() as u64;
-        for (i, b) in self.buckets.iter().enumerate() {
-            // bucket age in seconds, from newest (0) to oldest ((len-1)*bucket_size).
-            let age = (len - 1 - i as u64) * self.bucket_size_secs;
-            let ts = now_boundary.saturating_sub(age);
+        for (i, b) in self.buckets.iter().rev().enumerate() {
+            let ts = now_boundary.saturating_sub(i as u64 * self.bucket_size_secs);
             if ts >= cutoff {
                 success += b.success;
                 failure += b.failure;
+            } else {
+                break;
             }
         }
         (success, failure)
@@ -94,12 +95,9 @@ impl RingBuffer {
         let n = self.buckets.len() as u64;
         let step = (stride / self.bucket_size_secs).min(n);
         for _ in 0..step {
-            // Rotate left by one bucket.
-            let first = self.buckets.remove(0);
-            self.buckets.push(Bucket { success: 0, failure: 0 });
-            // We discard `first` (out of window). For very long strides this
-            // silently drops history; that's the desired behaviour for a ring.
-            let _ = first;
+            // Rotate left by one bucket without shifting the remaining vector.
+            self.buckets.pop_front();
+            self.buckets.push_back(Bucket::default());
         }
         self.head_ts = target;
     }
