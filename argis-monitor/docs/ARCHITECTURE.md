@@ -44,12 +44,7 @@ The `prometheus_client::Registry` is internally synchronized (`parking_lot` mute
 
 ### Sliding window counter
 
-The current implementation uses a `SlidingCounters` struct with four u64 fields (short/long x success/failure). This is correct for the simple case but does not implement the SRE multi-window recipe exactly:
-
-- "Short window" is approximated as cumulative since startup.
-- "Long window" is approximated as cumulative since startup.
-
-This is **documented in `docs/SLO_SPEC.md`** as a known approximation. The replacement is a ring buffer of timestamped `(success, failure)` pairs; when that lands the counter struct goes away.
+The monitor uses a fixed-size `RingBuffer` of timestamped `(success, failure)` buckets for each target. Window queries walk the newest buckets and stop at the requested cutoff, so short and long burn-rate calculations use trailing-window semantics. Advancing the ring rotates buckets without shifting the remaining history.
 
 ### Why axum for the exporter
 
