@@ -126,6 +126,12 @@ impl StateStore {
         payload_json: &str,
         fired_at_unix: u64,
     ) -> Result<(), StateStoreError> {
+        if !matches!(event, "fired" | "resolved") {
+            return Err(StateStoreError::InvalidState(format!("invalid alert event: {event}")));
+        }
+        if !matches!(severity, "ok" | "warning" | "critical") {
+            return Err(StateStoreError::InvalidState(format!("invalid alert severity: {severity}")));
+        }
         self.conn.execute(
             "INSERT INTO alert_history (key, event, severity, burn_rate, threshold, payload_json, fired_at_unix)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
