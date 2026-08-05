@@ -36,6 +36,8 @@ pub enum StateStoreError {
     Sqlite(#[from] rusqlite::Error),
     #[error("invalid state string in DB: {0}")]
     InvalidState(String),
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// A snapshot of one (target, rule) state machine.
@@ -61,11 +63,7 @@ impl StateStore {
     /// Open or create the SQLite file at `path`. Runs the schema migration.
     pub fn open(path: &Path) -> Result<Self, StateStoreError> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                StateStoreError::Sqlite(rusqlite::Error::InvalidParameterName(
-                    format!("create_dir_all({parent:?}): {e}").into(),
-                ))
-            })?;
+            std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(path)?;
         conn.execute_batch(SCHEMA)?;
@@ -78,14 +76,13 @@ impl StateStore {
         let mut stmt = self.conn.prepare(
             "SELECT key, state, since_unix, last_fired_unix, sustained_secs FROM alert_state",
         )?;
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_and_then([], |row| {
             let key: String = row.get(0)?;
             let state_str: String = row.get(1)?;
             let since_unix: u64 = row.get(2)?;
             let last_fired_unix: u64 = row.get(3)?;
             let sustained_secs: u64 = row.get(4)?;
-            let state = parse_state(&state_str, since_unix, last_fired_unix)
-                .map_err(|e| rusqlite::Error::InvalidQuery)?;
+            let state = parse_state_err(&state_str, since_unix, last_fired_unix)?;
             Ok((key, TrackerSnapshot { state, sustained_secs }))
         })?;
         let mut out = Vec::new();
@@ -130,19 +127,9 @@ CREATE TABLE IF NOT EXISTS alert_state (
 CREATE INDEX IF NOT EXISTS idx_alert_state_key ON alert_state(key);
 "#;
 
-/// Wrapper that surfaces corrupt rows as `StateStoreError::InvalidState`.
-/// Kept separate from the closure-internal `parse_state` (which has to return
-/// `rusqlite::Error` because it runs inside `query_map`'s closure).
+/// Parse a persisted state string and surface corrupt rows as
+/// `StateStoreError::InvalidState`.
 pub fn parse_state_err(s: &str, since: u64, last_fired: u64) -> Result<AlertState, StateStoreError> {
-    match s {
-        "ok" => Ok(AlertState::Ok),
-        "pending" => Ok(AlertState::Pending { since }),
-        "firing" => Ok(AlertState::Firing { since, last_fired_at: last_fired }),
-        other => Err(StateStoreError::InvalidState(other.to_string())),
-    }
-}
-
-fn parse_state(s: &str, since: u64, last_fired: u64) -> Result<AlertState, StateStoreError> {
     match s {
         "ok" => Ok(AlertState::Ok),
         "pending" => Ok(AlertState::Pending { since }),
