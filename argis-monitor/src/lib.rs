@@ -57,7 +57,7 @@ pub use ring_buffer::{Bucket, RingBuffer};
 pub use target::Target;
 pub use webhook::{deliver_all, DeliveryReport};
 pub use metrics::{Outcome, Sample};
-pub use poller::{Monitor, PollError, PollOutcome};
+pub use poller::{Monitor, PollError, PollOutcome, SLOBurnRates};
 pub use slo::{burn_rate, BurnWindow};
 
 /// Re-export of the crate version (matches `Cargo.toml`).
