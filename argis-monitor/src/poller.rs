@@ -2,14 +2,14 @@
 //! the shared `Metrics` registry, and feeds the `RingBuffer` per target for
 //! proper SLO multi-window burn-rate computation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use prometheus_client::registry::Registry;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex};
 use tracing::{debug, error, info, warn};
 
 
@@ -29,6 +29,8 @@ pub struct PollOutcome {
     pub sample: Sample,
     pub burn_short: f64,
     pub burn_long: f64,
+    #[serde(default)]
+    pub burn_by_slo: HashMap<String, (f64, f64)>,
     #[serde(default)]
     pub alert_payloads: Vec<crate::alerts::AlertPayload>,
 }
@@ -77,6 +79,26 @@ impl Monitor {
     pub fn new(config: Config) -> Result<Self, PollError> {
         if config.targets.is_empty() {
             return Err(PollError::NoTargets);
+        }
+        let mut names = HashSet::new();
+        for target in &config.targets {
+            if !names.insert(target.name.clone()) {
+                return Err(PollError::InvalidConfig(format!(
+                    "duplicate target name: {}", target.name
+                )));
+            }
+        }
+        for slo in &config.slos {
+            if !slo.target.is_finite() || !(0.0..=1.0).contains(&slo.target) {
+                return Err(PollError::InvalidConfig(format!(
+                    "SLO {} target must be finite and within [0,1]", slo.name
+                )));
+            }
+            if slo.window_secs == 0 {
+                return Err(PollError::InvalidConfig(format!(
+                    "SLO {} window_secs must be > 0", slo.name
+                )));
+            }
         }
         let mut headers = reqwest::header::HeaderMap::new();
         if let Some(tok) = &config.bearer_token {
@@ -175,37 +197,49 @@ impl Monitor {
         let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
         let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
 
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
         // Spawn one task per target.
         let mut handles = Vec::with_capacity(cfg.targets.len());
         for target in cfg.targets.clone() {
             let me = self.clone();
             let interval = target.poll_interval.unwrap_or(cfg.poll_interval);
             let timeout = target.poll_timeout.unwrap_or(cfg.poll_timeout);
+            let shutdown = shutdown_rx.clone();
             let handle = tokio::spawn(async move {
-                me.run_target(target, interval, timeout).await;
+                me.run_target(target, interval, timeout, shutdown).await;
             });
             handles.push(handle);
         }
 
-        // Block on signals.
+        // Block on signals, then stop every target loop before awaiting it.
         tokio::select! {
             _ = sigterm.recv() => { info!("SIGTERM, exiting"); }
             _ = sigint.recv()  => { info!("SIGINT, exiting");  }
         }
+        let _ = shutdown_tx.send(true);
         for h in handles { let _ = h.await; }
         Ok(())
     }
 
     /// One target's poll loop. Spawned as its own tokio task.
-    async fn run_target(&self, target: Target, interval: Duration, timeout: Duration) {
+    async fn run_target(&self, target: Target, interval: Duration, timeout: Duration, mut shutdown: watch::Receiver<bool>) {
         let mut ticker = tokio::time::interval(interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         info!(target = %target.name, url = %target.url, interval_secs = interval.as_secs(), "target poll loop starting");
         loop {
-            ticker.tick().await;
-            match self.poll_once_target(&target, timeout).await {
-                Ok(outcome) => debug!(?outcome, target = %target.name, "poll ok"),
-                Err(err) => warn!(target = %target.name, error = %err, "poll failed"),
+            tokio::select! {
+                _ = ticker.tick() => {
+                    match self.poll_once_target(&target, timeout).await {
+                        Ok(outcome) => debug!(?outcome, target = %target.name, "poll ok"),
+                        Err(err) => warn!(target = %target.name, error = %err, "poll failed"),
+                    }
+                }
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() {
+                        break;
+                    }
+                }
             }
         }
     }
@@ -262,35 +296,46 @@ impl Monitor {
         tc.long.record(is_success, ts);
 
         let short_window = BurnWindow::FAST_BURN.long.as_secs();
-        let long_window = tc.long.bucket_size_secs().max(1) * tc.long.len() as u64;
         let (s_short, f_short) = tc.short.window(short_window, ts);
-        let (s_long, f_long) = tc.long.window(long_window, ts);
-
+        let mut burn_by_slo = HashMap::new();
+        let mut burn_by_rule = HashMap::new();
         let mut burn_short = 0.0_f64;
         let mut burn_long = 0.0_f64;
         for slo in &self.inner.config.slos {
             let bs = burn_rate(s_short, f_short, slo.target);
+            let (s_long, f_long) = tc.long.window(slo.window_secs.max(1), ts);
             let bl = burn_rate(s_long, f_long, slo.target);
             m.record_burn(&format!("{}::{}", target.name, slo.name), BurnWindow::FAST_BURN, bs);
             m.record_burn(&format!("{}::{}", target.name, slo.name), BurnWindow::SLOW_BURN, bl);
+            burn_by_slo.insert(slo.name.clone(), (bs, bl));
+            for rule in self.inner.config.alert_rules.iter().filter(|r| r.slo == slo.name) {
+                let rule_long = rule.window
+                    .map(|window| tc.long.window(window.as_secs().max(1), ts))
+                    .map(|(s, f)| burn_rate(s, f, slo.target))
+                    .unwrap_or(bl);
+                burn_by_rule.insert(rule.name.clone(), (bs, rule_long));
+            }
             burn_short = bs;
             burn_long = bl;
         }
+        drop(c);
         drop(m);
 
-        // Evaluate alert rules (separately so the metrics lock is released).
-        let payloads = self.evaluate_alerts(&target.name, burn_short, burn_long, ts).await;
-        Ok(PollOutcome { sample, burn_short, burn_long, alert_payloads: payloads })
+        // Evaluate alert rules with SLO- and rule-window-specific rates.
+        let payloads = self.evaluate_alerts(&target.name, &burn_by_slo, &burn_by_rule, ts).await;
+        Ok(PollOutcome { sample, burn_short, burn_long, burn_by_slo, alert_payloads: payloads })
     }
 
     /// Evaluate every alert rule against the latest burn rates. Returns the
     /// list of payloads that fired (already delivered via webhooks).
-    async fn evaluate_alerts(&self, target_name: &str, burn_short: f64, burn_long: f64, ts: u64) -> Vec<alerts::AlertPayload> {
+    async fn evaluate_alerts(&self, target_name: &str, burns: &HashMap<String, (f64, f64)>, rule_burns: &HashMap<String, (f64, f64)>, ts: u64) -> Vec<alerts::AlertPayload> {
         let mut fired = Vec::new();
         for rule in &self.inner.config.alert_rules {
+            let (burn_short, burn_long) = burns.get(&rule.slo).copied().unwrap_or((0.0, 0.0));
+            let (rule_short, rule_long) = rule_burns.get(&rule.name).copied().unwrap_or((burn_short, burn_long));
             let burn = match rule.window {
-                Some(w) if w >= crate::slo::BurnWindow::SLOW_BURN.long => burn_long,
-                _ => burn_short,
+                Some(_) => rule_long,
+                None => rule_short,
             };
             let key = format!("{}::{}", target_name, rule.name);
 
