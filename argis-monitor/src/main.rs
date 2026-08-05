@@ -23,7 +23,7 @@ struct Cli {
 enum Cmd {
     /// Start the poll loop + exporter. Blocks until SIGINT/SIGTERM.
     Start {
-        /// Single-target shortcut. Equivalent to --targets gateway=<url>.
+        /// Single-target shortcut. Replaces YAML targets with gateway=<url>.
         #[arg(long, env = "ARGIS_MONITOR_TARGET")]
         target: Option<String>,
         /// Multi-target form: NAME=URL repeated, e.g. --targets openai=http://a --targets anthropic=http://b
@@ -126,12 +126,18 @@ fn init_tracing() {
 }
 
 
-/// Apply CLI --target / --targets NAME=URL onto a Config. Only used if the
-/// config came from the CLI (no config file), so it never overrides a
-/// YAML-defined target list silently.
+/// Apply CLI target flags onto a Config.
+///
+/// The CLI contract is that explicitly supplied target flags override the
+/// YAML target list. `--target` is the single-target shortcut; repeated
+/// `--targets NAME=URL` values provide the replacement list for multi-target
+/// runs. When both forms are supplied, the shortcut is included as `gateway`
+/// followed by the named targets.
 fn apply_cli_targets(cfg: &mut Config, target: Option<String>, targets: &[String]) {
-    if let Some(t) = target {
+    if target.is_some() || !targets.is_empty() {
         cfg.targets.clear();
+    }
+    if let Some(t) = target {
         cfg.targets.push(argis_monitor::Target::new("gateway", t));
     }
     for t in targets {
@@ -140,5 +146,38 @@ fn apply_cli_targets(cfg: &mut Config, target: Option<String>, targets: &[String
         } else {
             tracing::warn!(target = %t, "ignoring malformed NAME=URL target");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_target_replaces_yaml_targets() {
+        let mut cfg = Config::default().with_target_named("yaml", "http://yaml");
+        apply_cli_targets(&mut cfg, Some("http://cli".into()), &[]);
+
+        assert_eq!(cfg.targets.len(), 1);
+        assert_eq!(cfg.targets[0].name, "gateway");
+        assert_eq!(cfg.targets[0].url, "http://cli");
+    }
+
+    #[test]
+    fn cli_targets_replace_yaml_targets_and_preserve_order() {
+        let mut cfg = Config::default().with_target_named("yaml", "http://yaml");
+        apply_cli_targets(
+            &mut cfg,
+            None,
+            &["first=http://first".into(), "second=http://second".into()],
+        );
+
+        assert_eq!(
+            cfg.targets
+                .iter()
+                .map(|target| (target.name.as_str(), target.url.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("first", "http://first"), ("second", "http://second")]
+        );
     }
 }

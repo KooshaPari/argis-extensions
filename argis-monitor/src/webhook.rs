@@ -8,6 +8,11 @@
 //! When the WebhookTarget carries AWS credentials, the request is signed
 //! with AWS SigV4 (see `crate::aws_sigv4`) before being sent. This is
 //! required for SNS / EventBridge / Lambda webhook targets.
+//!
+//! User-supplied HTTP headers are validated before delivery. An invalid name
+//! or value is logged and fails closed: no request is sent and no retry is
+//! attempted; the returned [`DeliveryReport`] contains the configuration
+//! error.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -93,6 +98,15 @@ async fn deliver_one(
             };
         }
     };
+    if let Err(error) = validate_user_headers(target) {
+        error!(url = %target.url, error = %error, "invalid webhook headers; delivery aborted");
+        return DeliveryReport {
+            url: target.url.clone(),
+            success: false,
+            status: None,
+            error: Some(error),
+        };
+    }
     let mut last_err = None;
     let mut last_status = None;
     let is_aws_target = aws.is_some();
@@ -207,6 +221,26 @@ async fn deliver_one(
         success: false,
         status: last_status,
         error: last_err,
+    }
+}
+
+fn validate_user_headers(target: &WebhookTarget) -> Result<(), String> {
+    let mut errors = Vec::new();
+    for (name, value) in &target.headers {
+        if reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_err() {
+            warn!(url = %target.url, header = %name, "invalid webhook header name; delivery will be aborted");
+            errors.push(format!("invalid header name `{name}`"));
+            continue;
+        }
+        if reqwest::header::HeaderValue::from_str(value).is_err() {
+            warn!(url = %target.url, header = %name, "invalid webhook header value; delivery will be aborted");
+            errors.push(format!("invalid value for header `{name}`"));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("webhook header validation failed: {}", errors.join("; ")))
     }
 }
 
@@ -426,5 +460,26 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("\"severity\":\"ok\""));
+    }
+
+    #[tokio::test]
+    async fn invalid_user_header_name_or_value_fails_closed() {
+        for (header, value, expected) in [
+            ("invalid header", "value", "invalid header name"),
+            ("x-valid", "value\nwith-control", "invalid value"),
+        ] {
+            let target = WebhookTarget {
+                url: "http://127.0.0.1:1/should-not-be-called".into(),
+                headers: HashMap::from([(header.into(), value.into())]),
+                ..Default::default()
+            };
+            let payload = AlertPayload::firing("r", "gateway", "s", 5.0, 2.0, 12345);
+            let reports = deliver_all(&reqwest::Client::new(), &[target], &payload).await;
+
+            assert_eq!(reports.len(), 1);
+            assert!(!reports[0].success);
+            assert_eq!(reports[0].status, None);
+            assert!(reports[0].error.as_deref().unwrap().contains(expected));
+        }
     }
 }

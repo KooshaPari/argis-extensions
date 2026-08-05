@@ -31,6 +31,17 @@ cargo build -p argis-monitor --release
 ./target/release/argis-monitor validate-config --config examples/basic.yaml
 ```
 
+### CLI and webhook configuration
+
+Explicit target flags take precedence over targets loaded from YAML. `--target`
+replaces the YAML target list with a single target named `gateway`; repeated
+`--targets NAME=URL` values replace it with the named target list. Supplying
+both forms includes `gateway` first, followed by the named targets.
+
+Webhook header names and values must be valid HTTP header components. An
+invalid configured header is logged and fails closed: that webhook delivery is
+reported as failed without sending a request or retrying it.
+
 ## Metrics exposed
 
 | Metric | Type | Labels | Meaning |
