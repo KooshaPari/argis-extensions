@@ -43,8 +43,8 @@ enum Cmd {
     },
     /// Validate a config file: parse it and print the resolved struct.
     ValidateConfig {
-        #[arg(long)]
-        config: PathBuf,
+        #[arg(long = "config")]
+        config_path: PathBuf,
     },
 }
 
@@ -76,8 +76,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             println!("{}", serde_json::to_string_pretty(&outcome)?);
             Ok(())
         }
-        Cmd::ValidateConfig { config } => {
-            let cfg = load_config(Some(&config))?;
+        Cmd::ValidateConfig { config_path } => {
+            let cfg = load_config(Some(&config_path))?;
             println!("{}", serde_json::to_string_pretty(&cfg)?);
             Ok(())
         }
