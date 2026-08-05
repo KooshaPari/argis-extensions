@@ -2,7 +2,7 @@
 //! the shared `Metrics` registry, and feeds the `RingBuffer` per target for
 //! proper SLO multi-window burn-rate computation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -58,6 +58,8 @@ pub struct Monitor {
 pub(crate) struct MonitorInner {
     pub config: Config,
     pub http: reqwest::Client,
+    /// Webhook client intentionally has no polling bearer headers.
+    pub webhook_http: reqwest::Client,
     pub registry: Arc<Registry>,
     pub metrics: Arc<Mutex<Metrics>>,
     pub counters: Mutex<HashMap<String, TargetCounters>>,
@@ -73,6 +75,39 @@ impl Monitor {
         if config.targets.is_empty() {
             return Err(PollError::NoTargets);
         }
+        let mut target_names = HashSet::new();
+        for target in &config.targets {
+            if !target_names.insert(&target.name) {
+                return Err(PollError::InvalidConfig(format!(
+                    "duplicate target name: {}",
+                    target.name
+                )));
+            }
+        }
+        let mut slo_names = HashSet::new();
+        for slo in &config.slos {
+            if !slo_names.insert(&slo.name) {
+                return Err(PollError::InvalidConfig(format!(
+                    "duplicate SLO name: {}",
+                    slo.name
+                )));
+            }
+        }
+        let mut rule_names = HashSet::new();
+        for rule in &config.alert_rules {
+            if !rule_names.insert(&rule.name) {
+                return Err(PollError::InvalidConfig(format!(
+                    "duplicate alert rule name: {}",
+                    rule.name
+                )));
+            }
+            if !config.slos.iter().any(|slo| slo.name == rule.slo) {
+                return Err(PollError::InvalidConfig(format!(
+                    "alert rule {} references unknown SLO {}",
+                    rule.name, rule.slo
+                )));
+            }
+        }
         let mut headers = reqwest::header::HeaderMap::new();
         if let Some(tok) = &config.bearer_token {
             headers.insert(
@@ -84,6 +119,10 @@ impl Monitor {
         }
         let http = reqwest::Client::builder()
             .default_headers(headers)
+            .timeout(config.poll_timeout)
+            .build()
+            .map_err(PollError::Transport)?;
+        let webhook_http = reqwest::Client::builder()
             .timeout(config.poll_timeout)
             .build()
             .map_err(PollError::Transport)?;
@@ -115,6 +154,7 @@ impl Monitor {
             inner: Arc::new(MonitorInner {
                 config,
                 http,
+                webhook_http,
                 registry: Arc::new(registry),
                 metrics: Arc::new(Mutex::new(metrics)),
                 counters: Mutex::new(counters),
@@ -240,13 +280,12 @@ impl Monitor {
         tc.long.record(is_success, ts);
 
         let short_window = BurnWindow::FAST_BURN.long.as_secs();
-        let long_window = tc.long.bucket_size_secs().max(1) * tc.long.len() as u64;
         let (s_short, f_short) = tc.short.window(short_window, ts);
-        let (s_long, f_long) = tc.long.window(long_window, ts);
 
         let mut burn_short = 0.0_f64;
         let mut burn_long = 0.0_f64;
         for slo in &self.inner.config.slos {
+            let (s_long, f_long) = tc.long.window(slo.window_secs, ts);
             let bs = burn_rate(s_short, f_short, slo.target);
             let bl = burn_rate(s_long, f_long, slo.target);
             m.record_burn(&format!("{}::{}", target.name, slo.name), BurnWindow::FAST_BURN, bs);
@@ -268,10 +307,12 @@ impl Monitor {
     async fn evaluate_alerts(&self, target_name: &str, ts: u64) -> Vec<alerts::AlertPayload> {
         let mut fired = Vec::new();
         for rule in &self.inner.config.alert_rules {
-            let slo_target = self.inner.config.slos.iter()
-                .find(|slo| slo.name == rule.slo)
-                .map(|slo| slo.target)
-                .unwrap_or(0.999);
+            let Some(slo) = self.inner.config.slos.iter()
+                .find(|slo| slo.name == rule.slo) else {
+                warn!(rule = %rule.name, slo = %rule.slo, "skipping alert rule with unknown SLO");
+                continue;
+            };
+            let slo_target = slo.target;
             let window_secs = rule.window
                 .unwrap_or(BurnWindow::FAST_BURN.long)
                 .as_secs();
@@ -292,7 +333,7 @@ impl Monitor {
                 alerts::evaluate(rule, target_name, burn, ts, tracker)
             };
             if let Decision::Fire(payload) = decision {
-                let reports = webhook::deliver_all(&self.inner.http, &rule.webhooks, &payload).await;
+                let reports = webhook::deliver_all(&self.inner.webhook_http, &rule.webhooks, &payload).await;
                 let mut last = self.inner.last_delivery.lock().await;
                 for report in reports {
                     last.insert(report.url.clone(), report);
