@@ -103,7 +103,7 @@ pub(crate) struct MonitorInner {
     pub last_delivery: Mutex<HashMap<String, webhook::DeliveryReport>>,
     /// Optional SQLite state store. When present, every alert state transition
     /// is persisted so the monitor can rehydrate after a restart.
-    pub state_store: Mutex<Option<StateStore>>,
+    pub state_store: Option<Mutex<StateStore>>,
 }
 
 impl Monitor {
@@ -196,7 +196,7 @@ impl Monitor {
                 counters: Mutex::new(counters),
                 alert_trackers: Mutex::new(alert_trackers),
                 last_delivery: Mutex::new(HashMap::new()),
-                state_store: Mutex::new(state_store),
+                state_store: state_store.map(Mutex::new),
             }),
         })
     }
@@ -367,53 +367,51 @@ impl Monitor {
                 _ => rates.short,
             };
             let key = format!("{}::{}", target_name, rule.name);
-            let snap;
-            let mut fired_payload = None;
-            {
+            let (snap, fired_payload) = {
                 let mut trackers = self.inner.alert_trackers.lock().await;
                 let tracker = trackers.entry(key.clone()).or_insert_with(AlertStateTracker::default);
-                match alerts::evaluate(rule, target_name, burn, ts, tracker) {
-                    Decision::Fire(payload) => {
-                        // Suppression check. A matching window swallows the
-                        // webhook delivery but the state machine still
-                        // transitions (so the alert would have fired is
-                        // visible in metrics + the alert_history table).
-                        let window_name = suppression::is_suppressed(
-                            &self.inner.config.alert_windows,
-                            target_name,
-                            &rule.name,
-                            ts,
-                        );
-                        if let Some(wname) = &window_name {
-                            tracing::info!(
-                                target = %target_name,
-                                rule = %rule.name,
-                                window = %wname,
-                                burn = burn,
-                                "alert suppressed by window"
-                            );
-                        } else {
-                            let reports = webhook::deliver_all(&self.inner.http, &rule.webhooks, &payload).await;
-                            let mut last = self.inner.last_delivery.lock().await;
-                            for r in reports {
-                                last.insert(r.url.clone(), r);
-                            }
-                        }
-                        fired_payload = Some(payload.clone());
-                        fired.push(payload);
-                    }
-                    Decision::None => {}
-                }
-                snap = TrackerSnapshot {
+                let fired_payload = match alerts::evaluate(rule, target_name, burn, ts, tracker) {
+                    Decision::Fire(payload) => Some(payload),
+                    Decision::None => None,
+                };
+                let snap = TrackerSnapshot {
                     state: tracker.state.clone(),
                     sustained_secs: tracker.sustained_for.as_secs(),
                 };
-            }
-            // Capture fired-meta for the alert_history insert below.
+                (snap, fired_payload)
+            };
+
+            // Capture fired-meta before moving the payload into the return list.
             let fired_meta = fired_payload.as_ref().map(|p| (p.rule.clone(), p.severity, p.burn_rate, p.threshold, p.fired_at_unix));
+            if let Some(payload) = fired_payload {
+                // Suppression and delivery happen after releasing the tracker
+                // lock so a slow webhook cannot serialize other targets.
+                let window_name = suppression::is_suppressed(
+                    &self.inner.config.alert_windows,
+                    target_name,
+                    &rule.name,
+                    ts,
+                );
+                if let Some(wname) = &window_name {
+                    tracing::info!(
+                        target = %target_name,
+                        rule = %rule.name,
+                        window = %wname,
+                        burn = burn,
+                        "alert suppressed by window"
+                    );
+                } else {
+                    let reports = webhook::deliver_all(&self.inner.http, &rule.webhooks, &payload).await;
+                    let mut last = self.inner.last_delivery.lock().await;
+                    for r in reports {
+                        last.insert(r.url.clone(), r);
+                    }
+                }
+                fired.push(payload);
+            }
             // Persist outside the trackers lock to avoid contention.
-            let mut store = self.inner.state_store.lock().await;
-            if let Some(s) = store.as_mut() {
+            if let Some(store) = &self.inner.state_store {
+                let mut s = store.lock().await;
                 if let Err(e) = s.save(&key, &snap) {
                     tracing::warn!(target = %target_name, rule = %rule.name, error = %e, "state store save failed");
                 }
@@ -440,7 +438,6 @@ impl Monitor {
                     }
                 }
             }
-            drop(store);
         }
         fired
     }
