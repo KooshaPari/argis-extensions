@@ -175,22 +175,27 @@ pub fn evaluate(
     match tracker.state {
         AlertState::Ok => {
             if burn >= rule.threshold {
-                tracker.state = AlertState::Pending { since: ts };
                 tracker.sustained_for = Duration::from_secs(0);
-                Decision::None
+                if rule.for_secs.is_zero() {
+                    tracker.state = AlertState::Firing { since: ts, last_fired_at: ts };
+                    Decision::Fire(AlertPayload::firing(
+                        &rule.name, target, &rule.slo, burn, rule.threshold, ts,
+                    ))
+                } else {
+                    tracker.state = AlertState::Pending { since: ts };
+                    Decision::None
+                }
             } else {
                 Decision::None
             }
         }
         AlertState::Pending { since } => {
-            if burn < resolve {
+            if burn <= resolve {
                 tracker.state = AlertState::Ok;
                 tracker.sustained_for = Duration::from_secs(0);
                 Decision::None
             } else {
-                // Increment sustained_for; if the new value meets the
-                // `for_secs` threshold, promote to Firing on this same tick.
-                tracker.sustained_for += Duration::from_secs(1);
+                tracker.sustained_for = Duration::from_secs(ts.saturating_sub(since));
                 if tracker.sustained_for >= rule.for_secs {
                     tracker.state = AlertState::Firing { since, last_fired_at: ts };
                     let payload = AlertPayload::firing(&rule.name, target, &rule.slo, burn, rule.threshold, ts);
