@@ -23,7 +23,7 @@
 //! ## Example
 //!
 //! ```
-//! use pheno_errors::{AppError, Problem};
+//! use pheno_errors::{rfc7807::Problem, AppError};
 //!
 //! let err = AppError::not_found("user", "42");
 //! let problem: Problem = (&err).into();
