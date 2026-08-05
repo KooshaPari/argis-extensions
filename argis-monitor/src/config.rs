@@ -3,6 +3,7 @@
 //! Loaded from CLI flags, env vars (prefix `ARGIS_MONITOR_`), and/or a YAML
 //! file. See `examples/basic.yaml` for a complete example.
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -82,6 +83,36 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Validate invariants required before starting any polling tasks.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.poll_interval.is_zero() {
+            return Err("poll_interval must be greater than zero".into());
+        }
+
+        let mut names = HashSet::with_capacity(self.targets.len());
+        for target in &self.targets {
+            if !names.insert(&target.name) {
+                return Err(format!("duplicate target name: {}", target.name));
+            }
+            if target.poll_interval.is_some_and(Duration::is_zero) {
+                return Err(format!(
+                    "poll interval for target {} must be greater than zero",
+                    target.name
+                ));
+            }
+        }
+
+        for slo in &self.slos {
+            if !slo.target.is_finite() || slo.target < 0.0 || slo.target > 1.0 {
+                return Err(format!(
+                    "SLO target for {} must be finite and within [0.0, 1.0]",
+                    slo.name
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Convenience: the first target's URL (or empty string if no targets).
     pub fn first_url(&self) -> &str {
         self.targets.first().map(|t| t.url.as_str()).unwrap_or("")
