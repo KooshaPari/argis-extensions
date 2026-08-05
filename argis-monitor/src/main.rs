@@ -29,10 +29,10 @@ enum Cmd {
         /// Multi-target form: NAME=URL repeated, e.g. --targets openai=http://a --targets anthropic=http://b
         #[arg(long = "targets", value_name = "NAME=URL", env = "ARGIS_MONITOR_TARGETS")]
         targets: Vec<String>,
-        #[arg(long, env = "ARGIS_MONITOR_POLL_INTERVAL", default_value = "15")]
-        poll_interval_secs: u64,
-        #[arg(long, env = "ARGIS_MONITOR_EXPORTER_ADDR", default_value = "0.0.0.0:9090")]
-        exporter_addr: String,
+        #[arg(long, env = "ARGIS_MONITOR_POLL_INTERVAL")]
+        poll_interval_secs: Option<u64>,
+        #[arg(long, env = "ARGIS_MONITOR_EXPORTER_ADDR")]
+        exporter_addr: Option<String>,
     },
     /// Run exactly one poll (for smoke tests + cron).
     Once {
@@ -60,8 +60,12 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         Cmd::Start { target, targets, poll_interval_secs, exporter_addr } => {
             let mut cfg = load_config(cli.config.as_deref())?;
             apply_cli_targets(&mut cfg, target, &targets);
-            cfg.poll_interval = Duration::from_secs(poll_interval_secs);
-            cfg.exporter_addr = exporter_addr;
+            if let Some(secs) = poll_interval_secs {
+                cfg.poll_interval = Duration::from_secs(secs);
+            }
+            if let Some(addr) = exporter_addr {
+                cfg.exporter_addr = addr;
+            }
             run_monitor(cfg).await
         }
         Cmd::Once { target, targets } => {
