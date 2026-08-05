@@ -40,8 +40,9 @@ lint:
         - name: black-format
           run: black --line-length 100 ${target}
           success_codes: [0, 1]
-          output: pass_fail
+          output: rewrite
           formatter: true
+          in_place: true
           direct_configs:
             - pyproject.toml
 
