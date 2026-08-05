@@ -175,15 +175,22 @@ pub fn evaluate(
     match tracker.state {
         AlertState::Ok => {
             if burn >= rule.threshold {
-                tracker.state = AlertState::Pending { since: ts };
                 tracker.sustained_for = Duration::from_secs(0);
-                Decision::None
+                if rule.for_secs.is_zero() {
+                    tracker.state = AlertState::Firing { since: ts, last_fired_at: ts };
+                    Decision::Fire(AlertPayload::firing(
+                        &rule.name, target, &rule.slo, burn, rule.threshold, ts,
+                    ))
+                } else {
+                    tracker.state = AlertState::Pending { since: ts };
+                    Decision::None
+                }
             } else {
                 Decision::None
             }
         }
         AlertState::Pending { since } => {
-            if burn < resolve {
+            if burn <= resolve {
                 tracker.state = AlertState::Ok;
                 tracker.sustained_for = Duration::from_secs(0);
                 Decision::None
@@ -244,7 +251,9 @@ mod opt_seconds_as_duration {
             "s" => 1, "m" => 60, "h" => 3600, "d" => 86_400,
             _ => return Err(format!("unknown duration unit: {unit}")),
         };
-        Ok(Duration::from_secs(n * mul))
+        n.checked_mul(mul)
+            .map(Duration::from_secs)
+            .ok_or_else(|| "duration is too large".to_string())
     }
 }
 
