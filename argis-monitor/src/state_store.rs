@@ -34,6 +34,8 @@ use crate::alerts::AlertState;
 pub enum StateStoreError {
     #[error("sqlite: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
     #[error("invalid state string in DB: {0}")]
     InvalidState(String),
 }
@@ -61,11 +63,7 @@ impl StateStore {
     /// Open or create the SQLite file at `path`. Runs the schema migration.
     pub fn open(path: &Path) -> Result<Self, StateStoreError> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                StateStoreError::Sqlite(rusqlite::Error::InvalidParameterName(
-                    format!("create_dir_all({parent:?}): {e}").into(),
-                ))
-            })?;
+            std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(path)?;
         conn.execute_batch(SCHEMA)?;
@@ -211,10 +209,9 @@ pub struct AlertHistoryRow {
     pub fired_at_unix: u64,
 }
 
-/// Wrapper that surfaces corrupt rows as `StateStoreError::InvalidState`.
-/// Kept separate from the closure-internal `parse_state` (which has to return
-/// `rusqlite::Error` because it runs inside `query_map`'s closure).
-pub fn parse_state_err(s: &str, since: u64, last_fired: u64) -> Result<AlertState, StateStoreError> {
+/// Parse a persisted alert state, surfacing corrupt rows as
+/// `StateStoreError::InvalidState`.
+pub fn parse_state(s: &str, since: u64, last_fired: u64) -> Result<AlertState, StateStoreError> {
     match s {
         "ok" => Ok(AlertState::Ok),
         "pending" => Ok(AlertState::Pending { since }),
@@ -223,14 +220,8 @@ pub fn parse_state_err(s: &str, since: u64, last_fired: u64) -> Result<AlertStat
     }
 }
 
-fn parse_state(s: &str, since: u64, last_fired: u64) -> Result<AlertState, StateStoreError> {
-    match s {
-        "ok" => Ok(AlertState::Ok),
-        "pending" => Ok(AlertState::Pending { since }),
-        "firing" => Ok(AlertState::Firing { since, last_fired_at: last_fired }),
-        other => Err(StateStoreError::InvalidState(other.to_string())),
-    }
-}
+/// Backward-compatible alias for callers using the previous name.
+pub use parse_state as parse_state_err;
 
 fn flatten(snap: &TrackerSnapshot) -> (&'static str, u64, u64) {
     match &snap.state {
