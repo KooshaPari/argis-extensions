@@ -1,0 +1,54 @@
+# argis-monitor example config — slice 3 (alerts + webhooks).
+#
+# Use with:  argis-monitor --config examples/basic.yaml start
+
+poll_interval: 15s
+poll_timeout: 5s
+exporter_addr: 0.0.0.0:9090
+
+# bearer_token: ${BIFROST_ADMIN_TOKEN}
+
+targets:
+  - name: gateway
+    url: http://127.0.0.1:8080/health
+  - name: openai
+    url: https://api.openai.com/v1/models
+    poll_interval: 30s
+  - name: anthropic
+    url: https://api.anthropic.com/v1/models
+    poll_interval: 30s
+  - name: google
+    url: https://generativelanguage.googleapis.com/v1/models
+    poll_interval: 30s
+
+slos:
+  - name: chat_completions_p99
+    window_secs: 2592000
+    target: 0.999
+  - name: chat_completions_p95
+    window_secs: 2592000
+    target: 0.95
+
+# Alert rules — fires when the per-target burn rate crosses `threshold`
+# for `for_secs`, then posts the payload to every webhook URL. Cooldown
+# prevents flapping. Resolve posts a separate payload (severity=ok).
+alert_rules:
+  - name: gateway_p99_fast_burn
+    slo: chat_completions_p99
+    threshold: 14.4        # Google SRE "fast burn" page-out
+    resolve_threshold: 1.0
+    for_secs: 0s          # fire on the tick that crosses
+    cooldown: 300s        # re-fire at most every 5 min
+    webhooks:
+      - url: http://localhost:9001/alerts
+        headers:
+          X-Source: argis-monitor
+
+  - name: gateway_p99_slow_burn
+    slo: chat_completions_p99
+    threshold: 6.0
+    resolve_threshold: 1.0
+    for_secs: 600s        # require 10 min sustained
+    cooldown: 1800s
+    webhooks:
+      - url: http://localhost:9001/alerts
