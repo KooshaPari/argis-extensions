@@ -287,63 +287,69 @@ impl Monitor {
     /// list of payloads that fired (already delivered via webhooks).
     async fn evaluate_alerts(&self, target_name: &str, burn_short: f64, burn_long: f64, ts: u64) -> Vec<alerts::AlertPayload> {
         let mut fired = Vec::new();
-        let mut store = self.inner.state_store.lock().await;
         for rule in &self.inner.config.alert_rules {
             let burn = match rule.window {
                 Some(w) if w >= crate::slo::BurnWindow::SLOW_BURN.long => burn_long,
                 _ => burn_short,
             };
             let key = format!("{}::{}", target_name, rule.name);
-            let snap;
-            {
+
+            // Update the tracker under its mutex, then release it before any
+            // webhook network I/O. This keeps parallel targets independent.
+            let (payload, snap) = {
                 let mut trackers = self.inner.alert_trackers.lock().await;
                 let tracker = trackers.entry(key.clone()).or_insert_with(AlertStateTracker::default);
-                match alerts::evaluate(rule, target_name, burn, ts, tracker) {
+                let payload = match alerts::evaluate(rule, target_name, burn, ts, tracker) {
                     Decision::Fire(payload) => {
-                        // Deliver before persistence so the post-fire
-                        // tracker state (which reflects the cooldown
-                        // anchor) is what we save.
-                        let reports = webhook::deliver_all(&self.inner.http, &rule.webhooks, &payload).await;
-                        let mut last = self.inner.last_delivery.lock().await;
-                        for r in reports {
-                            last.insert(r.url.clone(), r);
-                        }
-                        fired.push(payload);
+                        fired.push(payload.clone());
+                        Some(payload)
                     }
-                    Decision::None => {}
-                }
-                snap = TrackerSnapshot {
+                    Decision::None => None,
+                };
+                let snap = TrackerSnapshot {
                     state: tracker.state.clone(),
                     sustained_secs: tracker.sustained_for.as_secs(),
                 };
+                (payload, snap)
+            };
+
+            if let Some(payload) = payload.as_ref() {
+                // Delivery is deliberately outside both the tracker and state
+                // store locks; network retries must not block other targets.
+                let reports = webhook::deliver_all(&self.inner.http, &rule.webhooks, payload).await;
+                let mut last = self.inner.last_delivery.lock().await;
+                for r in reports {
+                    last.insert(r.url.clone(), r);
+                }
             }
-            // Capture fired-meta for the alert_history insert below.
-            let fired_meta = fired.last().map(|p| (p.rule.clone(), p.severity, p.burn_rate, p.threshold, p.fired_at_unix));
-            // Persist outside the trackers lock to avoid contention.
+
+            // Persist the post-evaluation snapshot and optional history event
+            // while holding the store lock only for the synchronous DB writes.
+            let mut store = self.inner.state_store.lock().await;
             if let Some(s) = store.as_mut() {
                 if let Err(e) = s.save(&key, &snap) {
                     tracing::warn!(target = %target_name, rule = %rule.name, error = %e, "state store save failed");
                 }
-                if let Some((rule_name, severity, burn, threshold, ts)) = &fired_meta {
+                if let Some(payload) = payload.as_ref() {
                     let payload_json = serde_json::to_string(&serde_json::json!({
-                        "rule": rule_name,
+                        "rule": &payload.rule,
                         "target": target_name,
                         "slo": &rule.slo,
-                        "burn_rate": burn,
-                        "threshold": threshold,
-                        "severity": format!("{:?}", severity).to_lowercase(),
-                        "fired_at_unix": ts,
+                        "burn_rate": payload.burn_rate,
+                        "threshold": payload.threshold,
+                        "severity": format!("{:?}", payload.severity).to_lowercase(),
+                        "fired_at_unix": payload.fired_at_unix,
                     })).unwrap_or_default();
                     let event = match snap.state {
                         crate::alerts::AlertState::Ok => "resolved",
                         _ => "fired",
                     };
-                    let severity_str = format!("{:?}", severity).to_lowercase();
+                    let severity_str = format!("{:?}", payload.severity).to_lowercase();
                     if let Err(e) = s.record_event(
                         &key, event, &severity_str,
-                        *burn, *threshold, &payload_json, *ts,
+                        payload.burn_rate, payload.threshold, &payload_json, payload.fired_at_unix,
                     ) {
-                        tracing::warn!(target = %target_name, rule = %rule_name, error = %e, "alert history record failed");
+                        tracing::warn!(target = %target_name, rule = %payload.rule, error = %e, "alert history record failed");
                     }
                 }
             }
