@@ -90,6 +90,9 @@ async fn run_monitor(cfg: Config) -> anyhow::Result<()> {
     let registry = monitor.registry();
     let _exp = exporter::serve(&cfg.exporter_addr, registry.clone()).await?;
     if let Some(push_url) = cfg.push_url.clone() {
+        if cfg.push_interval_secs == 0 {
+            return Err(anyhow::anyhow!("push_interval_secs must be greater than zero"));
+        }
         let job = cfg.push_job.clone()
             .or_else(|| std::env::var("HOSTNAME").ok().filter(|s| !s.is_empty()))
             .unwrap_or_else(|| "argis-monitor".to_string());
@@ -128,8 +131,10 @@ fn init_tracing() {
 /// config came from the CLI (no config file), so it never overrides a
 /// YAML-defined target list silently.
 fn apply_cli_targets(cfg: &mut Config, target: Option<String>, targets: &[String]) {
-    if let Some(t) = target {
+    if target.is_some() || !targets.is_empty() {
         cfg.targets.clear();
+    }
+    if let Some(t) = target {
         cfg.targets.push(argis_monitor::Target::new("gateway", t));
     }
     for t in targets {
