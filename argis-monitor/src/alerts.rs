@@ -188,7 +188,9 @@ pub fn evaluate(
             }
         }
         AlertState::Pending { since } => {
-            if burn < resolve {
+            if burn < rule.threshold {
+                // The threshold condition must remain continuously true for
+                // `for_secs`; a dip below it starts a fresh pending interval.
                 tracker.state = AlertState::Ok;
                 tracker.sustained_for = Duration::from_secs(0);
                 Decision::None
