@@ -31,8 +31,8 @@ enum Cmd {
         targets: Vec<String>,
         #[arg(long, env = "ARGIS_MONITOR_POLL_INTERVAL")]
         poll_interval_secs: Option<u64>,
-        #[arg(long, env = "ARGIS_MONITOR_EXPORTER_ADDR", default_value = "0.0.0.0:9090")]
-        exporter_addr: String,
+        #[arg(long, env = "ARGIS_MONITOR_EXPORTER_ADDR")]
+        exporter_addr: Option<String>,
     },
     /// Run exactly one poll (for smoke tests + cron).
     Once {
@@ -63,9 +63,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             if let Some(s) = poll_interval_secs {
                 cfg.poll_interval = Duration::from_secs(s);
             }
-            // CLI exporter_addr overrides only if non-default
-            if exporter_addr != "0.0.0.0:9090" {
-                cfg.exporter_addr = exporter_addr;
+            if let Some(addr) = exporter_addr {
+                cfg.exporter_addr = addr;
             }
             run_monitor(cfg).await
         }
@@ -112,12 +111,13 @@ fn init_tracing() {
 }
 
 
-/// Apply CLI --target / --targets NAME=URL onto a Config. Only used if the
-/// config came from the CLI (no config file), so it never overrides a
-/// YAML-defined target list silently.
+/// Apply CLI --target / --targets NAME=URL onto a Config. Explicit CLI
+/// targets replace the configured target list so the requested set is polled.
 fn apply_cli_targets(cfg: &mut Config, target: Option<String>, targets: &[String]) {
-    if let Some(t) = target {
+    if target.is_some() || !targets.is_empty() {
         cfg.targets.clear();
+    }
+    if let Some(t) = target {
         cfg.targets.push(argis_monitor::Target::new("gateway", t));
     }
     for t in targets {
