@@ -94,7 +94,7 @@ impl Config {
             if !names.insert(&target.name) {
                 return Err(format!("duplicate target name: {}", target.name));
             }
-            if target.poll_interval.is_some_and(Duration::is_zero) {
+            if target.poll_interval.is_some_and(|interval| interval.is_zero()) {
                 return Err(format!(
                     "poll interval for target {} must be greater than zero",
                     target.name
@@ -217,7 +217,8 @@ mod tests {
         assert!(cfg.validate().unwrap_err().contains("SLO target"));
 
         let mut cfg = Config::default();
-        cfg.targets.push(cfg.targets[0].clone());
+        let duplicate = cfg.targets[0].clone();
+        cfg.targets.push(duplicate);
         assert!(cfg.validate().unwrap_err().contains("duplicate target name"));
     }
 }
