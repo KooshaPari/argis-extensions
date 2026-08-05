@@ -1,0 +1,79 @@
+[package]
+name = "argis-monitor"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT OR Apache-2.0"
+description = "Observable Integration substrate for bifrost-extensions (Tenet 4). Polls the Bifrost gateway, computes SLO burn rate, exports Prometheus metrics."
+repository = "https://github.com/KooshaPari/argis-extensions"
+documentation = "https://docs.rs/argis-monitor"
+keywords = ["argis", "bifrost", "monitoring", "slo", "prometheus", "observability"]
+categories = ["development-tools", "api-bindings", "asynchronous"]
+readme = "README.md"
+
+# Standalone crate (matches the pheno-* fleet convention). Consumers add
+# this to their own workspace or depend on it via path/git.
+[workspace]
+
+[lib]
+name = "argis_monitor"
+path = "src/lib.rs"
+
+[[bin]]
+name = "argis-monitor"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime (pollers + axum server).
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+# HTTP client for polling the Bifrost gateway.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+# HTTP server exposing the Prometheus /metrics endpoint.
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
+# Prometheus exposition format encoder.
+prometheus-client = "0.25"
+# CLI (start | once | validate-config).
+clap = { version = "4", features = ["derive", "env"] }
+# Config + serialisation.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Errors.
+thiserror = "1"
+anyhow = "1"
+# Tracing substrate (init + per-poll spans).
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# SQLite state store (alert state persistence). `bundled` = no system libsqlite.
+rusqlite = { version = "0.32", default-features = false, features = ["bundled"] }
+# Time math (SLO window math).
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+# Async-friendly intervals.
+async-trait = "0.1"
+# YAML config parsing.
+serde_yaml = "0.9"
+# Test mocks.
+wiremock = { version = "0.6", optional = true }
+
+[features]
+default = []
+test-mocks = ["dep:wiremock"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
+proptest = "1"
+wiremock = "0.6"
+approx = "0.5"
+serde_json = "1"
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "burn_rate"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
