@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use crate::alerts::{AlertPayload, WebhookTarget};
 
@@ -19,8 +19,6 @@ pub enum WebhookError {
     Transport(#[from] reqwest::Error),
     #[error("webhook returned non-2xx: {status}")]
     NonSuccess { status: u16 },
-    #[error("webhook URL parse: {0}")]
-    InvalidUrl(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
