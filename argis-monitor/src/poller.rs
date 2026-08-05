@@ -88,6 +88,7 @@ impl Monitor {
                 )));
             }
         }
+        let slo_names: HashSet<&str> = config.slos.iter().map(|s| s.name.as_str()).collect();
         for slo in &config.slos {
             if !slo.target.is_finite() || !(0.0..=1.0).contains(&slo.target) {
                 return Err(PollError::InvalidConfig(format!(
@@ -97,6 +98,14 @@ impl Monitor {
             if slo.window_secs == 0 {
                 return Err(PollError::InvalidConfig(format!(
                     "SLO {} window_secs must be > 0", slo.name
+                )));
+            }
+        }
+        for rule in &config.alert_rules {
+            if !slo_names.contains(rule.slo.as_str()) {
+                return Err(PollError::InvalidConfig(format!(
+                    "alert rule {} references unknown SLO {}",
+                    rule.name, rule.slo
                 )));
             }
         }
