@@ -38,9 +38,18 @@ pub async fn deliver_all(
     targets: &[WebhookTarget],
     payload: &AlertPayload,
 ) -> Vec<DeliveryReport> {
+    let mut tasks = tokio::task::JoinSet::new();
+    for target in targets.iter().cloned() {
+        let http = http.clone();
+        let payload = payload.clone();
+        tasks.spawn(async move { deliver_one(&http, &target, &payload).await });
+    }
+
     let mut reports = Vec::with_capacity(targets.len());
-    for t in targets {
-        reports.push(deliver_one(http, t, payload).await);
+    while let Some(result) = tasks.join_next().await {
+        if let Ok(report) = result {
+            reports.push(report);
+        }
     }
     reports
 }
