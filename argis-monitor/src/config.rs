@@ -42,7 +42,7 @@ impl Default for SLO {
 pub struct Config {
     /// Targets to poll. At least one required. The monitor spawns one tokio
     /// task per target. Each target's `provider` label is its `name`.
-    #[serde(default)]
+    #[serde(default = "default_targets")]
     pub targets: Vec<crate::target::Target>,
     /// How often to poll each target by default. Per-target overrides apply
     /// if the target sets its own `poll_interval`.
@@ -55,7 +55,7 @@ pub struct Config {
     #[serde(default = "default_exporter_addr")]
     pub exporter_addr: String,
     /// SLOs to track. Defaults to a single "three nines" chat-completions SLO.
-    #[serde(default)]
+    #[serde(default = "default_slos")]
     pub slos: Vec<SLO>,
     /// Alert rules evaluated each tick. Empty by default (alerts off).
     #[serde(default)]
@@ -90,6 +90,14 @@ pub struct Config {
 
 fn default_push_interval() -> u64 { 15 }
 
+fn default_targets() -> Vec<crate::target::Target> {
+    vec![crate::target::Target::new("gateway", "http://127.0.0.1:8080")]
+}
+
+fn default_slos() -> Vec<SLO> {
+    vec![SLO::default()]
+}
+
 fn default_data_dir() -> Option<std::path::PathBuf> {
     Some(std::path::PathBuf::from("./data"))
 }
@@ -101,11 +109,11 @@ fn default_exporter_addr() -> String { "0.0.0.0:9090".to_string() }
 impl Default for Config {
     fn default() -> Self {
         Self {
-            targets: vec![crate::target::Target::new("gateway", "http://127.0.0.1:8080")],
+            targets: default_targets(),
             poll_interval: default_poll_interval(),
             poll_timeout: default_poll_timeout(),
             exporter_addr: default_exporter_addr(),
-            slos: vec![SLO::default()],
+            slos: default_slos(),
             alert_rules: Vec::new(),
             bearer_token: None,
             data_dir: default_data_dir(),
