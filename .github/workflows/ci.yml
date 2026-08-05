@@ -179,6 +179,10 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          # gitleaks-action scans the pull request range from the event payload;
+          # retain the base and parent commits so that range is resolvable.
+          fetch-depth: 0
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
