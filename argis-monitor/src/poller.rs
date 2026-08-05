@@ -54,8 +54,8 @@ pub(crate) struct MonitorInner {
     pub config: Config,
     pub http: reqwest::Client,
     pub registry: Arc<Registry>,
-    pub metrics: Arc<Mutex<Metrics>>,
-    pub counters: Mutex<HashMap<String, TargetCounters>>,
+    pub metrics: Metrics,
+    pub counters: HashMap<String, Mutex<TargetCounters>>,
 }
 
 impl Monitor {
@@ -80,7 +80,8 @@ impl Monitor {
             .map_err(PollError::Transport)?;
 
         let mut registry = Registry::default();
-        let metrics = Metrics::new(&mut registry, config.first_url());
+        let target_urls: Vec<String> = config.targets.iter().map(|t| t.url.clone()).collect();
+        let metrics = Metrics::new(&mut registry, &target_urls);
         for slo in &config.slos {
             metrics.record_slo_target(&slo.name, slo.target);
         }
@@ -90,10 +91,10 @@ impl Monitor {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         let mut counters = HashMap::new();
         for target in &config.targets {
-            counters.insert(target.name.clone(), TargetCounters {
+            counters.insert(target.name.clone(), Mutex::new(TargetCounters {
                 short: RingBuffer::new(BurnWindow::FAST_BURN.long.as_secs(), now),
                 long: RingBuffer::new(max_window_secs, now),
-            });
+            }));
         }
 
         Ok(Self {
@@ -101,8 +102,8 @@ impl Monitor {
                 config,
                 http,
                 registry: Arc::new(registry),
-                metrics: Arc::new(Mutex::new(metrics)),
-                counters: Mutex::new(counters),
+                metrics,
+                counters,
             }),
         })
     }
@@ -119,7 +120,9 @@ impl Monitor {
             "argis-monitor starting"
         );
 
+        #[cfg(unix)]
         let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        #[cfg(unix)]
         let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
 
         // Spawn one task per target.
@@ -134,10 +137,17 @@ impl Monitor {
             handles.push(handle);
         }
 
-        // Block on signals.
+        // Block on signals. Unix distinguishes SIGTERM/SIGINT; other
+        // platforms expose Ctrl+C through the portable Tokio API.
+        #[cfg(unix)]
         tokio::select! {
             _ = sigterm.recv() => { info!("SIGTERM, exiting"); }
             _ = sigint.recv()  => { info!("SIGINT, exiting");  }
+        }
+        #[cfg(not(unix))]
+        {
+            tokio::signal::ctrl_c().await?;
+            info!("Ctrl+C, exiting");
         }
         for h in handles { let _ = h.await; }
         Ok(())
@@ -196,14 +206,14 @@ impl Monitor {
             }
         };
 
-        let mut m = self.inner.metrics.lock().await;
-        m.record_sample(&sample);
+        self.inner.metrics.record_sample(&sample);
 
-        // Update per-target ring buffers + compute burn against each SLO.
-        let mut c = self.inner.counters.lock().await;
-        let tc = c.get_mut(&target.name).ok_or_else(|| {
+        // Update this target's ring buffers under its own lock, then release
+        // it before publishing burn gauges so other targets can proceed.
+        let counter = self.inner.counters.get(&target.name).ok_or_else(|| {
             PollError::InvalidConfig(format!("target {} not initialised", target.name))
         })?;
+        let mut tc = counter.lock().await;
         let is_success = sample.outcome == Outcome::Ok;
         tc.short.record(is_success, ts);
         tc.long.record(is_success, ts);
@@ -212,14 +222,23 @@ impl Monitor {
         let long_window = tc.long.bucket_size_secs().max(1) * tc.long.len() as u64;
         let (s_short, f_short) = tc.short.window(short_window, ts);
         let (s_long, f_long) = tc.long.window(long_window, ts);
+        drop(tc);
 
         let mut burn_short = 0.0_f64;
         let mut burn_long = 0.0_f64;
         for slo in &self.inner.config.slos {
             let bs = burn_rate(s_short, f_short, slo.target);
             let bl = burn_rate(s_long, f_long, slo.target);
-            m.record_burn(&format!("{}::{}", target.name, slo.name), BurnWindow::FAST_BURN, bs);
-            m.record_burn(&format!("{}::{}", target.name, slo.name), BurnWindow::SLOW_BURN, bl);
+            self.inner.metrics.record_burn(
+                &format!("{}::{}", target.name, slo.name),
+                BurnWindow::FAST_BURN,
+                bs,
+            );
+            self.inner.metrics.record_burn(
+                &format!("{}::{}", target.name, slo.name),
+                BurnWindow::SLOW_BURN,
+                bl,
+            );
             burn_short = bs;
             burn_long = bl;
         }
