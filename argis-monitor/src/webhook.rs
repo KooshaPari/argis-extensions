@@ -53,14 +53,33 @@ async fn deliver_one(http: &reqwest::Client, target: &WebhookTarget, payload: &A
             Ok(r) => r,
             Err(e) => { last_err = Some(format!("build: {e}")); continue; }
         };
-        // apply headers
+        // Apply headers strictly: malformed names/values are a delivery
+        // failure, not a silently dropped authentication or routing header.
         let headers = req.headers_mut();
         for (k, v) in &target.headers {
-            if let Ok(name) = reqwest::header::HeaderName::from_bytes(k.as_bytes()) {
-                if let Ok(val) = reqwest::header::HeaderValue::from_str(v) {
-                    headers.insert(name, val);
+            let name = match reqwest::header::HeaderName::from_bytes(k.as_bytes()) {
+                Ok(name) => name,
+                Err(e) => {
+                    return DeliveryReport {
+                        url: target.url.clone(),
+                        success: false,
+                        status: None,
+                        error: Some(format!("invalid header name {k:?}: {e}")),
+                    };
                 }
-            }
+            };
+            let val = match reqwest::header::HeaderValue::from_str(v) {
+                Ok(val) => val,
+                Err(e) => {
+                    return DeliveryReport {
+                        url: target.url.clone(),
+                        success: false,
+                        status: None,
+                        error: Some(format!("invalid header value for {k:?}: {e}")),
+                    };
+                }
+            };
+            headers.insert(name, val);
         }
         match http.execute(req).await {
             Ok(resp) => {
