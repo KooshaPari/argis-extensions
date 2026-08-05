@@ -37,6 +37,22 @@ impl Default for SLO {
     }
 }
 
+impl SLO {
+    /// Validate the success-ratio target before it reaches burn-rate math.
+    pub fn validate(&self) -> Result<(), String> {
+        if !(0.0..=1.0).contains(&self.target) {
+            return Err(format!(
+                "SLO '{}' target must be in [0.0, 1.0], got {}",
+                self.name, self.target
+            ));
+        }
+        if self.window_secs == 0 {
+            return Err(format!("SLO '{}' window_secs must be greater than zero", self.name));
+        }
+        Ok(())
+    }
+}
+
 /// Top-level configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
