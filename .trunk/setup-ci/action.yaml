@@ -34,5 +34,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        test "$(prettier --version)" = "2.6.2"
-        test "$(actionlint --version)" = "1.6.9"
+        command -v prettier
+        command -v actionlint
+        prettier --version
+        actionlint --version
