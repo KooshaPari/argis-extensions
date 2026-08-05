@@ -73,7 +73,9 @@ mod opt_seconds_as_duration {
             "d" => 86_400,
             _ => return Err(format!("unknown duration unit: {unit}")),
         };
-        Ok(Duration::from_secs(n * mul))
+        n.checked_mul(mul)
+            .map(Duration::from_secs)
+            .ok_or_else(|| "duration is too large".to_string())
     }
 }
 
