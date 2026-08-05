@@ -11,7 +11,7 @@
 //!   - Forwarding to a downstream TSDB when direct scraping isn't possible
 //!
 //! The push is best-effort: failures are logged with `warn!` and the task
-//! continues. Backoff is the standard retry pattern (1 retry after 5s).
+//! continues. Failed pushes are retried on the next tick.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,20 +25,16 @@ use tracing::{error, info, warn};
 pub enum PushError {
     #[error("HTTP transport: {0}")]
     Transport(#[from] reqwest::Error),
-    #[error("invalid URL: {0}")]
-    InvalidUrl(String),
+    #[error("serialization error: {0}")]
+    Serialization(String),
     #[error("non-2xx response: {status}")]
     NonSuccess { status: u16 },
 }
 
 /// Push the registry's contents to `url`. Returns the HTTP status on success.
-pub async fn push_to(url: &str, registry: &Registry) -> Result<u16, PushError> {
+pub async fn push_to(client: &reqwest::Client, url: &str, registry: &Registry) -> Result<u16, PushError> {
     let mut buf = String::new();
-    encode(&mut buf, registry).map_err(|e| PushError::InvalidUrl(e.to_string()))?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(PushError::Transport)?;
+    encode(&mut buf, registry).map_err(|e| PushError::Serialization(e.to_string()))?;
     let resp = client
         .post(url)
         .header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -72,9 +68,19 @@ pub async fn run_pusher(
         urlencoding::encode(&job_name),
         urlencoding::encode(&instance_label),
     );
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+    {
+        Ok(client) => client,
+        Err(e) => {
+            error!(error = %e, "failed to initialize Pushgateway client");
+            return;
+        }
+    };
     loop {
         ticker.tick().await;
-        match push_to(&push_url, &registry).await {
+        match push_to(&client, &push_url, &registry).await {
             Ok(status) => info!(%push_url, status, "pushed"),
             Err(e) => warn!(error = %e, %push_url, "push failed; will retry next tick"),
         }
