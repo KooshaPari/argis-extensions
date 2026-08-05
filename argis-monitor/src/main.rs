@@ -31,8 +31,8 @@ enum Cmd {
         targets: Vec<String>,
         #[arg(long, env = "ARGIS_MONITOR_POLL_INTERVAL")]
         poll_interval_secs: Option<u64>,
-        #[arg(long, env = "ARGIS_MONITOR_EXPORTER_ADDR", default_value = "0.0.0.0:9090")]
-        exporter_addr: String,
+        #[arg(long, env = "ARGIS_MONITOR_EXPORTER_ADDR")]
+        exporter_addr: Option<String>,
     },
     /// Run exactly one poll (for smoke tests + cron).
     Once {
@@ -63,9 +63,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             if let Some(s) = poll_interval_secs {
                 cfg.poll_interval = Duration::from_secs(s);
             }
-            // CLI exporter_addr overrides only if non-default
-            if exporter_addr != "0.0.0.0:9090" {
-                cfg.exporter_addr = exporter_addr;
+            if let Some(addr) = exporter_addr {
+                cfg.exporter_addr = addr;
             }
             run_monitor(cfg).await
         }
