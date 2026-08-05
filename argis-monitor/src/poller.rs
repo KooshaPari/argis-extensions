@@ -319,7 +319,6 @@ impl Monitor {
     /// list of payloads that fired (already delivered via webhooks).
     async fn evaluate_alerts(&self, target_name: &str, burn_short: f64, burn_long: f64, ts: u64) -> Vec<alerts::AlertPayload> {
         let mut fired = Vec::new();
-        let mut store = self.inner.state_store.lock().await;
         for rule in &self.inner.config.alert_rules {
             let burn = match rule.window {
                 Some(w) if w >= crate::slo::BurnWindow::SLOW_BURN.long => burn_long,
@@ -348,7 +347,8 @@ impl Monitor {
                 fired.push(payload);
             }
 
-            // Persist outside the trackers lock to avoid contention.
+            // Persist outside both the tracker and network-delivery locks.
+            let mut store = self.inner.state_store.lock().await;
             if let Some(s) = store.as_mut() {
                 if let Err(e) = s.save(&key, &snap) {
                     tracing::warn!(target = %target_name, rule = %rule.name, error = %e, "state store save failed");
