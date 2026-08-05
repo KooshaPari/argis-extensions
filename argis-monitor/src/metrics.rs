@@ -93,7 +93,7 @@ pub struct Metrics {
 }
 
 impl Metrics {
-    pub fn new(registry: &mut Registry, target: &str) -> Self {
+    pub fn new(registry: &mut Registry, targets: &[String]) -> Self {
         let polls_total = Family::<PollLabels, Counter>::default();
         let poll_errors_total = Family::<ErrorLabels, Counter>::default();
         // Histogram bucket boundaries in seconds (f64); we observe `latency.as_secs_f64()`.
@@ -126,9 +126,14 @@ impl Metrics {
         );
         registry.register("argis_monitor_target_info", "Static info about the target gateway.", target_info.clone());
 
-        target_info
-            .get_or_create(&InfoLabels { target: target.into(), version: env!("CARGO_PKG_VERSION").into() })
-            .inc();
+        for target in targets {
+            target_info
+                .get_or_create(&InfoLabels {
+                    target: target.clone(),
+                    version: env!("CARGO_PKG_VERSION").into(),
+                })
+                .inc();
+        }
 
         Self { polls_total, poll_errors_total, poll_duration, last_poll_ts, up, burn_rate, slo_target, target_info }
     }
