@@ -171,19 +171,24 @@ pub fn evaluate(
     tracker: &mut AlertStateTracker,
 ) -> Decision {
     let resolve = rule.resolve_threshold.unwrap_or(rule.threshold / 2.0);
-    let now_in_state = tracker.sustained_for;
-    match tracker.state {
+    match &tracker.state {
         AlertState::Ok => {
             if burn >= rule.threshold {
-                tracker.state = AlertState::Pending { since: ts };
-                tracker.sustained_for = Duration::from_secs(0);
-                Decision::None
+                if rule.for_secs.is_zero() {
+                    tracker.state = AlertState::Firing { since: ts, last_fired_at: ts };
+                    let payload = AlertPayload::firing(&rule.name, target, &rule.slo, burn, rule.threshold, ts);
+                    Decision::Fire(payload)
+                } else {
+                    tracker.state = AlertState::Pending { since: ts };
+                    tracker.sustained_for = Duration::from_secs(0);
+                    Decision::None
+                }
             } else {
                 Decision::None
             }
         }
         AlertState::Pending { since } => {
-            if burn < resolve {
+            if burn < rule.threshold {
                 tracker.state = AlertState::Ok;
                 tracker.sustained_for = Duration::from_secs(0);
                 Decision::None
@@ -192,7 +197,7 @@ pub fn evaluate(
                 // `for_secs` threshold, promote to Firing on this same tick.
                 tracker.sustained_for += Duration::from_secs(1);
                 if tracker.sustained_for >= rule.for_secs {
-                    tracker.state = AlertState::Firing { since, last_fired_at: ts };
+                    tracker.state = AlertState::Firing { since: *since, last_fired_at: ts };
                     let payload = AlertPayload::firing(&rule.name, target, &rule.slo, burn, rule.threshold, ts);
                     Decision::Fire(payload)
                 } else {
@@ -207,9 +212,9 @@ pub fn evaluate(
                 tracker.sustained_for = Duration::from_secs(0);
                 return Decision::Fire(payload);
             }
-            let since_fire = ts.saturating_sub(last_fired_at);
+            let since_fire = ts.saturating_sub(*last_fired_at);
             if since_fire >= rule.cooldown.as_secs() {
-                tracker.state = AlertState::Firing { since, last_fired_at: ts };
+                tracker.state = AlertState::Firing { since: *since, last_fired_at: ts };
                 let payload = AlertPayload::firing(&rule.name, target, &rule.slo, burn, rule.threshold, ts);
                 Decision::Fire(payload)
             } else {
