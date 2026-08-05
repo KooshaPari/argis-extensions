@@ -164,7 +164,7 @@ impl StateStore {
         };
         let rows = match key_prefix {
             Some(p) => {
-                let escaped = p.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+                let escaped = escape_like_prefix(p);
                 stmt.query_map(rusqlite::params![format!("{escaped}%"), limit], row_map)?
             },
             None => stmt.query_map(rusqlite::params![limit], row_map)?,
