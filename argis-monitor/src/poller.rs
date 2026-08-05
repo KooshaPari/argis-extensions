@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use prometheus_client::registry::Registry;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{watch, Mutex};
 use tracing::{debug, error, info, warn};
 
 use crate::config::{Config, SLO};
@@ -126,14 +126,17 @@ impl Monitor {
         #[cfg(unix)]
         let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
 
-        // Spawn one task per target.
+        // Give every target task the same shutdown signal so it can leave
+        // its polling loop before the parent awaits the task handles.
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let mut handles = Vec::with_capacity(cfg.targets.len());
         for target in cfg.targets.clone() {
             let me = self.clone();
             let interval = target.poll_interval.unwrap_or(cfg.poll_interval);
             let timeout = target.poll_timeout.unwrap_or(cfg.poll_timeout);
+            let target_shutdown = shutdown_rx.clone();
             let handle = tokio::spawn(async move {
-                me.run_target(target, interval, timeout).await;
+                me.run_target(target, interval, timeout, target_shutdown).await;
             });
             handles.push(handle);
         }
@@ -150,20 +153,36 @@ impl Monitor {
             tokio::signal::ctrl_c().await?;
             info!("Ctrl+C, exiting");
         }
+        let _ = shutdown_tx.send(true);
         for h in handles { let _ = h.await; }
         Ok(())
     }
 
     /// One target's poll loop. Spawned as its own tokio task.
-    async fn run_target(&self, target: Target, interval: Duration, timeout: Duration) {
+    async fn run_target(
+        &self,
+        target: Target,
+        interval: Duration,
+        timeout: Duration,
+        mut shutdown: watch::Receiver<bool>,
+    ) {
         let mut ticker = tokio::time::interval(interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         info!(target = %target.name, url = %target.url, interval_secs = interval.as_secs(), "target poll loop starting");
         loop {
-            ticker.tick().await;
-            match self.poll_once_target(&target, timeout).await {
-                Ok(outcome) => debug!(?outcome, target = %target.name, "poll ok"),
-                Err(err) => warn!(target = %target.name, error = %err, "poll failed"),
+            tokio::select! {
+                _ = ticker.tick() => {
+                    match self.poll_once_target(&target, timeout).await {
+                        Ok(outcome) => debug!(?outcome, target = %target.name, "poll ok"),
+                        Err(err) => warn!(target = %target.name, error = %err, "poll failed"),
+                    }
+                }
+                changed = shutdown.changed() => {
+                    if changed.is_ok() {
+                        info!(target = %target.name, "shutdown requested");
+                    }
+                    break;
+                }
             }
         }
     }
@@ -220,23 +239,27 @@ impl Monitor {
         tc.long.record(is_success, ts);
 
         let short_window = BurnWindow::FAST_BURN.long.as_secs();
-        let long_window = tc.long.bucket_size_secs().max(1) * tc.long.len() as u64;
         let (s_short, f_short) = tc.short.window(short_window, ts);
-        let (s_long, f_long) = tc.long.window(long_window, ts);
+        let slo_burns: Vec<(String, f64, f64)> = self.inner.config.slos.iter().map(|slo| {
+            let (s_long, f_long) = tc.long.window(slo.window_secs, ts);
+            (
+                slo.name.clone(),
+                burn_rate(s_short, f_short, slo.target),
+                burn_rate(s_long, f_long, slo.target),
+            )
+        }).collect();
         drop(tc);
 
         let mut burn_short = 0.0_f64;
         let mut burn_long = 0.0_f64;
-        for slo in &self.inner.config.slos {
-            let bs = burn_rate(s_short, f_short, slo.target);
-            let bl = burn_rate(s_long, f_long, slo.target);
+        for (slo_name, bs, bl) in slo_burns {
             self.inner.metrics.record_burn(
-                &format!("{}::{}", target.name, slo.name),
+                &format!("{}::{}", target.name, slo_name),
                 BurnWindow::FAST_BURN,
                 bs,
             );
             self.inner.metrics.record_burn(
-                &format!("{}::{}", target.name, slo.name),
+                &format!("{}::{}", target.name, slo_name),
                 BurnWindow::SLOW_BURN,
                 bl,
             );
@@ -251,7 +274,8 @@ impl Monitor {
         let target = self.inner.config.targets.first()
             .ok_or(PollError::NoTargets)?
             .clone();
-        self.poll_once_target(&target, self.inner.config.poll_timeout).await
+        let timeout = target.poll_timeout.unwrap_or(self.inner.config.poll_timeout);
+        self.poll_once_target(&target, timeout).await
     }
 
     pub fn windows(&self) -> &'static [BurnWindow] {
