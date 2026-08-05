@@ -136,9 +136,6 @@ impl Monitor {
             "argis-monitor starting"
         );
 
-        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
-        let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
-
         // Spawn one task per target.
         let mut handles = Vec::with_capacity(cfg.targets.len());
         for target in cfg.targets.clone() {
@@ -151,12 +148,29 @@ impl Monitor {
             handles.push(handle);
         }
 
-        // Block on signals.
-        tokio::select! {
-            _ = sigterm.recv() => { info!("SIGTERM, exiting"); }
-            _ = sigint.recv()  => { info!("SIGINT, exiting");  }
+        // Block on signals. Unix handles SIGTERM/SIGINT; Windows uses Ctrl-C.
+        #[cfg(unix)]
+        {
+            let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+            let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
+            tokio::select! {
+                _ = sigterm.recv() => { info!("SIGTERM, exiting"); }
+                _ = sigint.recv()  => { info!("SIGINT, exiting"); }
+            }
         }
-        for h in handles { let _ = h.await; }
+        #[cfg(not(unix))]
+        {
+            tokio::signal::ctrl_c().await?;
+            info!("Ctrl-C received, exiting");
+        }
+
+        // Cancel target loops so shutdown does not wait on their infinite tickers.
+        for handle in &handles {
+            handle.abort();
+        }
+        for handle in handles {
+            let _ = handle.await;
+        }
         Ok(())
     }
 
@@ -242,33 +256,49 @@ impl Monitor {
         }
         drop(m);
 
-        // Evaluate alert rules (separately so the metrics lock is released).
-        let payloads = self.evaluate_alerts(&target.name, burn_short, burn_long, ts).await;
+        // Release shared state before alert evaluation and webhook I/O.
+        drop(c);
+        drop(m);
+
+        let payloads = self.evaluate_alerts(&target.name, ts).await;
         Ok(PollOutcome { sample, burn_short, burn_long, alert_payloads: payloads })
     }
 
-    /// Evaluate every alert rule against the latest burn rates. Returns the
-    /// list of payloads that fired (already delivered via webhooks).
-    async fn evaluate_alerts(&self, target_name: &str, burn_short: f64, burn_long: f64, ts: u64) -> Vec<alerts::AlertPayload> {
+    /// Evaluate every alert rule against its configured SLO/window. Returns
+    /// payloads that fired (already delivered via webhooks).
+    async fn evaluate_alerts(&self, target_name: &str, ts: u64) -> Vec<alerts::AlertPayload> {
         let mut fired = Vec::new();
         for rule in &self.inner.config.alert_rules {
-            let burn = match rule.window {
-                Some(w) if w >= crate::slo::BurnWindow::SLOW_BURN.long => burn_long,
-                _ => burn_short,
+            let slo_target = self.inner.config.slos.iter()
+                .find(|slo| slo.name == rule.slo)
+                .map(|slo| slo.target)
+                .unwrap_or(0.999);
+            let window_secs = rule.window
+                .unwrap_or(BurnWindow::FAST_BURN.long)
+                .as_secs();
+
+            // Keep the counters lock scoped to the ring query. Never hold it
+            // while waiting for webhook transport.
+            let burn = {
+                let counters = self.inner.counters.lock().await;
+                let Some(tc) = counters.get(target_name) else { continue };
+                let (success, failure) = tc.long.window(window_secs, ts);
+                burn_rate(success, failure, slo_target)
             };
-            let key = format!("{}::{}", target_name, rule.name);
-            let mut trackers = self.inner.alert_trackers.lock().await;
-            let tracker = trackers.entry(key).or_insert_with(AlertStateTracker::default);
-            match alerts::evaluate(rule, target_name, burn, ts, tracker) {
-                Decision::Fire(payload) => {
-                    let reports = webhook::deliver_all(&self.inner.http, &rule.webhooks, &payload).await;
-                    let mut last = self.inner.last_delivery.lock().await;
-                    for r in reports {
-                        last.insert(r.url.clone(), r);
-                    }
-                    fired.push(payload);
+
+            let decision = {
+                let mut trackers = self.inner.alert_trackers.lock().await;
+                let key = format!("{}::{}", target_name, rule.name);
+                let tracker = trackers.entry(key).or_insert_with(AlertStateTracker::default);
+                alerts::evaluate(rule, target_name, burn, ts, tracker)
+            };
+            if let Decision::Fire(payload) = decision {
+                let reports = webhook::deliver_all(&self.inner.http, &rule.webhooks, &payload).await;
+                let mut last = self.inner.last_delivery.lock().await;
+                for report in reports {
+                    last.insert(report.url.clone(), report);
                 }
-                Decision::None => {}
+                fired.push(payload);
             }
         }
         fired
