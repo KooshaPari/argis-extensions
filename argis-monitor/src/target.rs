@@ -52,14 +52,12 @@ mod opt_seconds_as_duration {
         enum Repr {
             Secs(u64),
             Text(String),
-            None_,
         }
         let opt: Option<Repr> = Option::deserialize(d)?;
         Ok(match opt {
             None => None,
             Some(Repr::Secs(n)) => Some(Duration::from_secs(n)),
             Some(Repr::Text(t)) => Some(parse_human(&t).map_err(serde::de::Error::custom)?),
-            Some(Repr::None_) => None,
         })
     }
     fn parse_human(s: &str) -> Result<Duration, String> {
