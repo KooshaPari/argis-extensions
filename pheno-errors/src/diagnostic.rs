@@ -13,7 +13,7 @@ pub enum AppDiagnostic {
     #[error("domain error: {0}")]
     #[diagnostic(
         code = "PHN-DOM-500",
-        help = "Review the operation's business rules and current state."
+        help = "Correct the input or state that violates the business rule before retrying."
     )]
     Domain(String),
 
@@ -65,9 +65,13 @@ impl From<&AppError> for AppDiagnostic {
 mod tests {
     use super::*;
 
-    fn report_debug(error: AppError) -> String {
+    fn diagnostic_code(error: AppError) -> String {
         let diagnostic = AppDiagnostic::from(&error);
-        format!("{:?}", miette::Report::new(diagnostic))
+        let code = diagnostic
+            .code()
+            .expect("every AppDiagnostic variant has a stable code")
+            .to_string();
+        code
     }
 
     #[test]
@@ -82,7 +86,7 @@ mod tests {
 
         for (error, code) in cases {
             assert!(
-                report_debug(error).contains(code),
+                diagnostic_code(error) == code,
                 "missing diagnostic code {code}"
             );
         }
@@ -90,9 +94,11 @@ mod tests {
 
     #[test]
     fn not_found_diagnostic_preserves_entity_and_id() {
-        let output = report_debug(AppError::not_found("user", "42"));
+        let error = AppError::not_found("user", "42");
+        let diagnostic = AppDiagnostic::from(&error);
+        let output = diagnostic.to_string();
         assert!(output.contains("user"));
         assert!(output.contains("42"));
-        assert!(output.contains("PHN-NOT-404"));
+        assert_eq!(diagnostic_code(error), "PHN-NOT-404");
     }
 }
