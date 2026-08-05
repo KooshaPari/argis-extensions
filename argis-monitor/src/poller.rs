@@ -64,6 +64,7 @@ impl Monitor {
         if config.targets.is_empty() {
             return Err(PollError::NoTargets);
         }
+        config.validate().map_err(PollError::InvalidConfig)?;
         let mut headers = reqwest::header::HeaderMap::new();
         if let Some(tok) = &config.bearer_token {
             headers.insert(
