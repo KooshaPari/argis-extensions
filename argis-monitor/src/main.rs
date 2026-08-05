@@ -127,9 +127,8 @@ fn init_tracing() {
 }
 
 
-/// Apply CLI --target / --targets NAME=URL onto a Config. Only used if the
-/// config came from the CLI (no config file), so it never overrides a
-/// YAML-defined target list silently.
+/// Apply CLI --target / --targets NAME=URL onto a Config. When any CLI
+/// target is provided, it replaces the targets loaded from the config file.
 fn apply_cli_targets(cfg: &mut Config, target: Option<String>, targets: &[String]) {
     if target.is_some() || !targets.is_empty() {
         cfg.targets.clear();
