@@ -46,6 +46,33 @@ pub async fn deliver_all(
 }
 
 async fn deliver_one(http: &reqwest::Client, target: &WebhookTarget, payload: &AlertPayload) -> DeliveryReport {
+    let mut parsed_headers = reqwest::header::HeaderMap::new();
+    for (key, value) in &target.headers {
+        let name = match reqwest::header::HeaderName::from_bytes(key.as_bytes()) {
+            Ok(name) => name,
+            Err(e) => {
+                return DeliveryReport {
+                    url: target.url.clone(),
+                    success: false,
+                    status: None,
+                    error: Some(format!("invalid header name {key:?}: {e}")),
+                };
+            }
+        };
+        let value = match reqwest::header::HeaderValue::from_str(value) {
+            Ok(value) => value,
+            Err(e) => {
+                return DeliveryReport {
+                    url: target.url.clone(),
+                    success: false,
+                    status: None,
+                    error: Some(format!("invalid header value for {key:?}: {e}")),
+                };
+            }
+        };
+        parsed_headers.insert(name, value);
+    }
+
     let mut last_err = None;
     let mut last_status = None;
     for attempt in 0..2u8 {
@@ -53,14 +80,11 @@ async fn deliver_one(http: &reqwest::Client, target: &WebhookTarget, payload: &A
             Ok(r) => r,
             Err(e) => { last_err = Some(format!("build: {e}")); continue; }
         };
-        // apply headers
+        // Do not leak polling credentials from the shared client's defaults.
         let headers = req.headers_mut();
-        for (k, v) in &target.headers {
-            if let Ok(name) = reqwest::header::HeaderName::from_bytes(k.as_bytes()) {
-                if let Ok(val) = reqwest::header::HeaderValue::from_str(v) {
-                    headers.insert(name, val);
-                }
-            }
+        headers.remove(reqwest::header::AUTHORIZATION);
+        for (name, value) in &parsed_headers {
+            headers.insert(name.clone(), value.clone());
         }
         match http.execute(req).await {
             Ok(resp) => {
