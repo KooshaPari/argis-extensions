@@ -188,9 +188,9 @@ pub fn evaluate(
                 tracker.sustained_for = Duration::from_secs(0);
                 Decision::None
             } else {
-                // Increment sustained_for; if the new value meets the
-                // `for_secs` threshold, promote to Firing on this same tick.
-                tracker.sustained_for += Duration::from_secs(1);
+                // Use wall-clock elapsed time rather than tick count so the
+                // configured poll interval does not change `for_secs` semantics.
+                tracker.sustained_for = Duration::from_secs(ts.saturating_sub(since));
                 if tracker.sustained_for >= rule.for_secs {
                     tracker.state = AlertState::Firing { since, last_fired_at: ts };
                     let payload = AlertPayload::firing(&rule.name, target, &rule.slo, burn, rule.threshold, ts);
