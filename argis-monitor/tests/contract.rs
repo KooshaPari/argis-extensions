@@ -8,7 +8,8 @@ use std::time::Duration;
 use argis_monitor::exporter;
 use argis_monitor::{Config, Monitor, Outcome, SLO};
 use prometheus_client::encoding::text::encode;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{body_json, method, path};
+use serde_json::json;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -102,7 +103,8 @@ async fn multi_window_burn_reflects_error_traffic() {
     let _m1 = Mock::given(method("GET")).and(path("/health"))
         .respond_with(ResponseTemplate::new(200))
         .expect(1..)
-        .mount(&server);
+        .mount(&server)
+        .await;
     Mock::given(method("GET")).and(path("/health"))
         .respond_with(ResponseTemplate::new(503))
         .mount(&server)
@@ -227,6 +229,16 @@ async fn webhook_posts_payload_as_json() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/alerts"))
+        .and(body_json(json!({
+            "rule": "r",
+            "target": "gateway",
+            "slo": "s",
+            "burn_rate": 5.0,
+            "threshold": 2.0,
+            "severity": "critical",
+            "fired_at_unix": 12345,
+            "message": "argis-monitor: target=gateway slo=s burn=5.00x threshold=2.00x (CRITICAL severity)"
+        })))
         .respond_with(ResponseTemplate::new(200))
         .expect(1)
         .mount(&server)
