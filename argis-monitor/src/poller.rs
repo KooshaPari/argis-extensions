@@ -86,6 +86,9 @@ impl Monitor {
         if config.targets.is_empty() {
             return Err(PollError::NoTargets);
         }
+        for slo in &config.slos {
+            slo.validate().map_err(PollError::InvalidConfig)?;
+        }
         let mut target_names = HashSet::new();
         for target in &config.targets {
             if !target_names.insert(&target.name) {
