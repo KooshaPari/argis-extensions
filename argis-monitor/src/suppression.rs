@@ -162,7 +162,7 @@ fn parse_hhmm(s: &str) -> Option<(u32, u32)> {
     let mut parts = s.split(':');
     let hh: u32 = parts.next()?.parse().ok()?;
     let mm: u32 = parts.next()?.parse().ok()?;
-    if hh > 23 || mm > 59 { return None; }
+    if parts.next().is_some() || hh > 23 || mm > 59 { return None; }
     Some((hh, mm))
 }
 
