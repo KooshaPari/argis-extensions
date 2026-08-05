@@ -27,6 +27,8 @@ pub struct SLO {
 fn default_slo_window_secs() -> u64 { 30 * 24 * 3600 }
 fn default_slo_target() -> f64 { 0.999 }
 
+fn default_slos() -> Vec<SLO> { vec![SLO::default()] }
+
 impl Default for SLO {
     fn default() -> Self {
         Self {
@@ -55,7 +57,7 @@ pub struct Config {
     #[serde(default = "default_exporter_addr")]
     pub exporter_addr: String,
     /// SLOs to track. Defaults to a single "three nines" chat-completions SLO.
-    #[serde(default)]
+    #[serde(default = "default_slos")]
     pub slos: Vec<SLO>,
     /// Alert rules evaluated each tick. Empty by default (alerts off).
     #[serde(default)]
@@ -161,7 +163,9 @@ mod seconds_as_duration {
             "d" => 86_400,
             _ => return Err(format!("unknown duration unit: {unit}")),
         };
-        Ok(Duration::from_secs(n * mul))
+        n.checked_mul(mul)
+            .map(Duration::from_secs)
+            .ok_or_else(|| "duration is too large".to_string())
     }
 }
 
