@@ -8,7 +8,7 @@
 //! for the in-process substrate; if memory ever becomes a concern, swap
 //! to compressed bitmaps (see docs/SLO_SPEC.md).
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::collections::VecDeque;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Bucket {
@@ -23,7 +23,7 @@ impl Bucket {
 /// A fixed-size ring of buckets, one per `bucket_size_secs`. The ring advances
 /// automatically on `record()` based on the wall-clock timestamp.
 pub struct RingBuffer {
-    buckets: Vec<Bucket>,
+    buckets: VecDeque<Bucket>,
     bucket_size_secs: u64,
     /// The unix-second timestamp of the most recent bucket boundary.
     head_ts: u64,
@@ -43,7 +43,7 @@ impl RingBuffer {
         assert!(bucket_size_secs > 0, "bucket_size_secs must be > 0");
         let n_buckets = (total_window_secs / bucket_size_secs).max(1) as usize;
         Self {
-            buckets: vec![Bucket::default(); n_buckets],
+            buckets: (0..n_buckets).map(|_| Bucket::default()).collect(),
             bucket_size_secs,
             head_ts: Self::boundary_for(bucket_size_secs, now_secs),
         }
@@ -78,7 +78,7 @@ impl RingBuffer {
         for (i, b) in self.buckets.iter().enumerate() {
             // bucket age in seconds, from newest (0) to oldest ((len-1)*bucket_size).
             let age = (len - 1 - i as u64) * self.bucket_size_secs;
-            let ts = now_boundary.saturating_sub(age);
+            let ts = self.head_ts.saturating_sub(age);
             if ts >= cutoff {
                 success += b.success;
                 failure += b.failure;
@@ -95,11 +95,8 @@ impl RingBuffer {
         let step = (stride / self.bucket_size_secs).min(n);
         for _ in 0..step {
             // Rotate left by one bucket.
-            let first = self.buckets.remove(0);
-            self.buckets.push(Bucket { success: 0, failure: 0 });
-            // We discard `first` (out of window). For very long strides this
-            // silently drops history; that's the desired behaviour for a ring.
-            let _ = first;
+            self.buckets.pop_front();
+            self.buckets.push_back(Bucket::default());
         }
         self.head_ts = target;
     }
