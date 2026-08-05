@@ -25,6 +25,11 @@ pub struct WebhookTarget {
     pub aws_region: Option<String>,
     #[serde(default)]
     pub aws_service: Option<String>,
+    /// SNS topic ARN used when `aws_service` is `sns`. SNS requires a
+    /// destination in the Publish request; EventBridge uses its default bus
+    /// unless a service-specific endpoint is configured.
+    #[serde(default)]
+    pub aws_topic_arn: Option<String>,
     /// Inline credentials. If unset, the substrate reads from
     /// `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`
     /// environment variables.

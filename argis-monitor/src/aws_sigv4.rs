@@ -72,6 +72,34 @@ pub fn sign_request_headers_with_headers(
     creds: &AwsCreds,
     extra_headers: &HashMap<String, String>,
 ) -> Result<HashMap<String, String>, SignError> {
+    sign_request_headers_with_headers_and_content_type(
+        method,
+        url,
+        body,
+        region,
+        service,
+        creds,
+        extra_headers,
+        "application/json",
+    )
+}
+
+/// Sign an outgoing request with an explicit content type.
+///
+/// The original signing APIs retain their `application/json` default for
+/// compatibility. AWS JSON protocol services such as SNS and EventBridge use
+/// `application/x-amz-json-*`, so webhook delivery uses this variant to keep
+/// the signed content type identical to the transmitted request.
+pub fn sign_request_headers_with_headers_and_content_type(
+    method: &str,
+    url: &str,
+    body: Option<&[u8]>,
+    region: &str,
+    service: &str,
+    creds: &AwsCreds,
+    extra_headers: &HashMap<String, String>,
+    content_type: &str,
+) -> Result<HashMap<String, String>, SignError> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -96,7 +124,10 @@ pub fn sign_request_headers_with_headers(
     let canonical_querystring = canonical_querystring(raw_query);
 
     let mut canonical_header_values = BTreeMap::new();
-    canonical_header_values.insert("content-type".to_string(), "application/json".to_string());
+    canonical_header_values.insert(
+        "content-type".to_string(),
+        canonical_header_value(content_type),
+    );
     canonical_header_values.insert("host".to_string(), host.clone());
     canonical_header_values.insert("x-amz-content-sha256".to_string(), body_hash.clone());
     canonical_header_values.insert("x-amz-date".to_string(), amz_date.clone());
