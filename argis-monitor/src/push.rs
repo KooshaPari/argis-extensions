@@ -11,7 +11,7 @@
 //!   - Forwarding to a downstream TSDB when direct scraping isn't possible
 //!
 //! The push is best-effort: failures are logged with `warn!` and the task
-//! continues. Backoff is the standard retry pattern (1 retry after 5s).
+//! continues. Failed pushes are retried on the next tick.
 
 use std::sync::Arc;
 use std::time::Duration;
