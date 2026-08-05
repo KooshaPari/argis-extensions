@@ -188,3 +188,36 @@ impl Config {
         Self::default().with_target_url(target)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn omitted_slos_use_the_documented_default() {
+        let cfg: Config = serde_yaml::from_str(
+            "targets:\n  - name: gateway\n    url: http://127.0.0.1:8080\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.slos, vec![SLO::default()]);
+    }
+
+    #[test]
+    fn validation_rejects_invalid_intervals_targets_and_names() {
+        let mut cfg = Config::default();
+        cfg.poll_interval = Duration::ZERO;
+        assert!(cfg.validate().unwrap_err().contains("poll_interval"));
+
+        let mut cfg = Config::default();
+        cfg.targets[0].poll_interval = Some(Duration::ZERO);
+        assert!(cfg.validate().unwrap_err().contains("gateway"));
+
+        let mut cfg = Config::default();
+        cfg.slos[0].target = f64::NAN;
+        assert!(cfg.validate().unwrap_err().contains("SLO target"));
+
+        let mut cfg = Config::default();
+        cfg.targets.push(cfg.targets[0].clone());
+        assert!(cfg.validate().unwrap_err().contains("duplicate target name"));
+    }
+}
