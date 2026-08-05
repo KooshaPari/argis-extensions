@@ -16,7 +16,7 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use chrono::{Datelike, NaiveDateTime, Timelike, Weekday};
+use chrono::{Datelike, Duration as ChronoDuration, NaiveDateTime, Timelike, Weekday};
 use serde::{Deserialize, Serialize};
 
 /// Days of the week for recurring windows.
@@ -112,16 +112,13 @@ fn one_shot_active(w: &WindowSpec, now_unix: u64) -> bool {
                 .map(|dt| dt.timestamp())
         })
     };
-    let start = match parse(&w.start_at) {
-        Some(t) => t,
-        None => return false,
-    };
-    let end = match parse(&w.end_at) {
-        Some(t) => t,
-        None => return false,
-    };
     let now = now_unix as i64;
-    now >= start && now <= end
+    match (parse(&w.start_at), parse(&w.end_at)) {
+        (Some(start), Some(end)) => now >= start && now <= end,
+        (Some(start), None) => now >= start,
+        (None, Some(end)) => now <= end,
+        (None, None) => false,
+    }
 }
 
 fn recurring_active(w: &WindowSpec, now_unix: u64) -> bool {
@@ -139,15 +136,20 @@ fn recurring_active(w: &WindowSpec, now_unix: u64) -> bool {
         Some(d) => d,
         None => return false,
     };
-    // Day filter (empty = every day).
-    if !w.days.is_empty() {
-        let today = Day::from_chrono(dt.weekday());
-        if !w.days.contains(&today) { return false; }
-    }
     let (hh, mm) = (dt.hour(), dt.minute());
     let now_secs = hh * 3600 + mm * 60;
     let start_secs = start_hhmm.0 * 3600 + start_hhmm.1 * 60;
     let end_secs = end_hhmm.0 * 3600 + end_hhmm.1 * 60;
+    // After midnight, a wrapped window belongs to the day on which it started.
+    let day_dt = if start_secs > end_secs && now_secs <= end_secs {
+        dt - ChronoDuration::days(1)
+    } else {
+        dt
+    };
+    if !w.days.is_empty() {
+        let day = Day::from_chrono(day_dt.weekday());
+        if !w.days.contains(&day) { return false; }
+    }
     if start_secs <= end_secs {
         now_secs >= start_secs && now_secs <= end_secs
     } else {
