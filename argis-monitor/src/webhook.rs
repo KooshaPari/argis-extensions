@@ -37,6 +37,17 @@ struct RequestPayload {
     fixed_headers: HashMap<String, String>,
 }
 
+type SigV4Signer = fn(
+    &str,
+    &str,
+    Option<&[u8]>,
+    &str,
+    &str,
+    &crate::aws_sigv4::AwsCreds,
+    &HashMap<String, String>,
+    &str,
+) -> Result<HashMap<String, String>, crate::aws_sigv4::SignError>;
+
 #[derive(Debug, Error)]
 pub enum WebhookError {
     #[error("HTTP transport: {0}")]
@@ -74,6 +85,21 @@ async fn deliver_one(
     target: &WebhookTarget,
     payload: &AlertPayload,
 ) -> DeliveryReport {
+    deliver_one_with_signer(
+        http,
+        target,
+        payload,
+        crate::aws_sigv4::sign_request_headers_with_headers_and_content_type,
+    )
+    .await
+}
+
+async fn deliver_one_with_signer(
+    http: &reqwest::Client,
+    target: &WebhookTarget,
+    payload: &AlertPayload,
+    signer: SigV4Signer,
+) -> DeliveryReport {
     let aws = match resolve_aws_config(target) {
         Ok(config) => config,
         Err(error) => {
@@ -107,86 +133,104 @@ async fn deliver_one(
             error: Some(error),
         };
     }
-    let mut last_err = None;
-    let mut last_status = None;
     let is_aws_target = aws.is_some();
-    for attempt in 0..2u8 {
-        let mut req = match http
-            .post(&target.url)
-            .header(reqwest::header::CONTENT_TYPE, request_payload.content_type)
-            .body(request_payload.body.clone())
-            .build()
-        {
-            Ok(r) => r,
-            Err(e) => {
-                last_err = Some(format!("build: {e}"));
-                continue;
-            }
-        };
-        // apply user-supplied headers
-        let mut headers_for_signing = HashMap::new();
-        {
-            let headers = req.headers_mut();
-            for (k, v) in &target.headers {
-                if let Ok(name) = reqwest::header::HeaderName::from_bytes(k.as_bytes()) {
-                    if is_aws_target
-                        && (name == reqwest::header::CONTENT_TYPE
-                            || name == reqwest::header::HOST
-                            || request_payload
-                                .fixed_headers
-                                .keys()
-                                .any(|fixed| fixed.eq_ignore_ascii_case(name.as_str())))
-                    {
-                        warn!(header = %name, url = %target.url, "ignoring AWS target header that is fixed by SigV4 signing");
-                        continue;
-                    }
-                    if let Ok(val) = reqwest::header::HeaderValue::from_str(v) {
-                        headers.insert(name, val);
-                        headers_for_signing.insert(k.clone(), v.clone());
-                    }
+    let mut req = match http
+        .post(&target.url)
+        .header(reqwest::header::CONTENT_TYPE, request_payload.content_type)
+        .body(request_payload.body.clone())
+        .build()
+    {
+        Ok(r) => r,
+        Err(e) => {
+            let error = format!("build: {e}");
+            error!(url = %target.url, error = %error, "webhook request build failed");
+            return DeliveryReport {
+                url: target.url.clone(),
+                success: false,
+                status: None,
+                error: Some(error),
+            };
+        }
+    };
+    // Apply user-supplied headers once. The resulting request is cloned for
+    // transport retries so SigV4 signing is never repeated.
+    let mut headers_for_signing = HashMap::new();
+    {
+        let headers = req.headers_mut();
+        for (k, v) in &target.headers {
+            if let Ok(name) = reqwest::header::HeaderName::from_bytes(k.as_bytes()) {
+                if is_aws_target
+                    && (name == reqwest::header::CONTENT_TYPE
+                        || name == reqwest::header::HOST
+                        || request_payload
+                            .fixed_headers
+                            .keys()
+                            .any(|fixed| fixed.eq_ignore_ascii_case(name.as_str())))
+                {
+                    warn!(header = %name, url = %target.url, "ignoring AWS target header that is fixed by SigV4 signing");
+                    continue;
                 }
-            }
-            for (name, value) in &request_payload.fixed_headers {
-                if let (Ok(name), Ok(value)) = (
-                    reqwest::header::HeaderName::from_bytes(name.as_bytes()),
-                    reqwest::header::HeaderValue::from_str(value),
-                ) {
-                    let signing_name = name.as_str().to_string();
-                    let signing_value = value.to_str().unwrap_or_default().to_string();
-                    headers.insert(name, value);
-                    headers_for_signing.insert(signing_name, signing_value);
+                if let Ok(val) = reqwest::header::HeaderValue::from_str(v) {
+                    headers.insert(name, val);
+                    headers_for_signing.insert(k.clone(), v.clone());
                 }
             }
         }
-        // SigV4 signing (if AWS config present).
-        if let Some(aws) = aws.as_ref() {
-            match crate::aws_sigv4::sign_request_headers_with_headers_and_content_type(
-                "POST",
-                &target.url,
-                Some(&request_payload.body),
-                &aws.region,
-                &aws.service,
-                &aws.creds,
-                &headers_for_signing,
-                request_payload.content_type,
+        for (name, value) in &request_payload.fixed_headers {
+            if let (Ok(name), Ok(value)) = (
+                reqwest::header::HeaderName::from_bytes(name.as_bytes()),
+                reqwest::header::HeaderValue::from_str(value),
             ) {
-                Ok(sig) => {
-                    let h = req.headers_mut();
-                    for (k, v) in sig {
-                        if let Ok(name) = reqwest::header::HeaderName::from_bytes(k.as_bytes()) {
-                            if let Ok(val) = reqwest::header::HeaderValue::from_str(&v) {
-                                h.insert(name, val);
-                            }
+                let signing_name = name.as_str().to_string();
+                let signing_value = value.to_str().unwrap_or_default().to_string();
+                headers.insert(name, value);
+                headers_for_signing.insert(signing_name, signing_value);
+            }
+        }
+    }
+    // SigV4 signing is deterministic for this request and must not consume a
+    // transport retry when it fails.
+    if let Some(aws) = aws.as_ref() {
+        match signer(
+            "POST",
+            &target.url,
+            Some(&request_payload.body),
+            &aws.region,
+            &aws.service,
+            &aws.creds,
+            &headers_for_signing,
+            request_payload.content_type,
+        ) {
+            Ok(sig) => {
+                let h = req.headers_mut();
+                for (k, v) in sig {
+                    if let Ok(name) = reqwest::header::HeaderName::from_bytes(k.as_bytes()) {
+                        if let Ok(val) = reqwest::header::HeaderValue::from_str(&v) {
+                            h.insert(name, val);
                         }
                     }
                 }
-                Err(e) => {
-                    last_err = Some(format!("aws sign: {e}"));
-                    continue;
-                }
+            }
+            Err(e) => {
+                let error = format!("aws sign: {e}");
+                error!(url = %target.url, error = %error, "webhook request signing failed");
+                return DeliveryReport {
+                    url: target.url.clone(),
+                    success: false,
+                    status: None,
+                    error: Some(error),
+                };
             }
         }
-        match http.execute(req).await {
+    }
+
+    let mut last_err = None;
+    let mut last_status = None;
+    for attempt in 0..2u8 {
+        let attempt_request = req
+            .try_clone()
+            .expect("webhook request body is cloneable");
+        match http.execute(attempt_request).await {
             Ok(resp) => {
                 let s = resp.status().as_u16();
                 last_status = Some(s);
@@ -380,6 +424,7 @@ fn build_request_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn delivery_report_serializes_to_json() {
@@ -403,6 +448,42 @@ mod tests {
             aws_secret_access_key: Some("SECRET".into()),
             ..Default::default()
         }
+    }
+
+    static SIGNER_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    fn failing_signer(
+        _method: &str,
+        url: &str,
+        _body: Option<&[u8]>,
+        _region: &str,
+        _service: &str,
+        _creds: &crate::aws_sigv4::AwsCreds,
+        _extra_headers: &HashMap<String, String>,
+        _content_type: &str,
+    ) -> Result<HashMap<String, String>, crate::aws_sigv4::SignError> {
+        SIGNER_CALLS.fetch_add(1, Ordering::SeqCst);
+        Err(crate::aws_sigv4::SignError::InvalidUrl(url.to_string()))
+    }
+
+    #[tokio::test]
+    async fn signing_failure_is_terminal_and_not_retried() {
+        SIGNER_CALLS.store(0, Ordering::SeqCst);
+        let target = signed_target("events");
+        let payload = AlertPayload::firing("r", "gateway", "s", 5.0, 2.0, 12345);
+
+        let report = deliver_one_with_signer(
+            &reqwest::Client::new(),
+            &target,
+            &payload,
+            failing_signer,
+        )
+        .await;
+
+        assert!(!report.success);
+        assert_eq!(report.status, None);
+        assert!(report.error.as_deref().unwrap().starts_with("aws sign: "));
+        assert_eq!(SIGNER_CALLS.load(Ordering::SeqCst), 1);
     }
 
     #[test]
