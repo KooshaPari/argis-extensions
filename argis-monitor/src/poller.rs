@@ -25,6 +25,7 @@ use tracing::instrument;
 pub use monitor::Monitor;
 pub use types::{MonitorInner, PollError, PollOutcome, TargetCounters};
 
+use crate::alerts;
 use crate::config::SLO;
 use crate::slo::BurnWindow;
 use crate::target::Target;
@@ -70,6 +71,23 @@ impl Monitor {
     #[instrument(skip(self))]
     pub async fn evaluate_meta_alerts(&self, ts: u64) -> Vec<String> {
         evaluate_meta_alerts::evaluate_meta_alerts_impl(self, ts).await
+    }
+
+    /// Evaluate every AlertRule against the latest burn rate. Returns the
+    /// list of `AlertPayload`s that fired (already delivered via webhooks).
+    ///
+    /// Slice 34 note: rules auto-disabled by the circuit breaker are
+    /// skipped; the `auto_disabled_rules` set is checked at the top of the
+    /// loop. Useful for tests and for direct callers that don't want to
+    /// run a full poll cycle.
+    pub async fn evaluate_alerts(
+        &self,
+        target_name: &str,
+        burn_short: f64,
+        burn_long: f64,
+        ts: u64,
+    ) -> Vec<alerts::AlertPayload> {
+        evaluate_alerts::evaluate_alerts_impl(self, target_name, burn_short, burn_long, ts).await
     }
 }
 

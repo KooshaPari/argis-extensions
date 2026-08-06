@@ -129,6 +129,9 @@ impl Monitor {
             alert_trackers: Mutex::new(alert_trackers),
             last_delivery: Mutex::new(HashMap::new()),
             state_store: Mutex::new(state_store),
+            // Slice 34: per-rule auto-disable (circuit breaker).
+            rule_fire_history: tokio::sync::Mutex::new(HashMap::new()),
+            auto_disabled_rules: tokio::sync::Mutex::new(std::collections::HashSet::new()),
         };
         Ok(Self {
             inner: ArcSwap::from_pointee(inner),

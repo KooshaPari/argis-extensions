@@ -37,9 +37,19 @@ pub struct AlertRule {
     /// Webhooks to notify when the rule fires.
     #[serde(default)]
     pub webhooks: Vec<WebhookTarget>,
+    /// After this many fires within `auto_disable_window`, automatically
+    /// disable the rule (circuit breaker). Requires the next poll to
+    /// observe the disable + stop evaluating it. `None` = never disable
+    /// (default; matches the previous behavior).
+    #[serde(default)]
+    pub auto_disable_after: Option<u32>,
+    /// Sliding window for the auto-disable counter. Defaults to 600s (10m).
+    #[serde(default, with = "super::serde_mods::seconds_as_duration")]
+    pub auto_disable_window: Duration,
 }
 
 fn default_cooldown_secs() -> Duration { Duration::from_secs(300) }
+fn default_auto_disable_window() -> Duration { Duration::from_secs(600) }
 
 impl Default for AlertRule {
     fn default() -> Self {
@@ -52,6 +62,8 @@ impl Default for AlertRule {
             for_secs: Duration::from_secs(0),
             cooldown: default_cooldown_secs(),
             webhooks: Vec::new(),
+            auto_disable_after: None,
+            auto_disable_window: default_auto_disable_window(),
         }
     }
 }

@@ -24,7 +24,19 @@ pub(crate) async fn evaluate_alerts_impl(
     let inner = me.inner.load();
     let mut fired = Vec::new();
     let mut store = inner.state_store.lock().await;
+    // Slice 34: snapshot the disabled set up front (avoids holding the
+    // Mutex across the await-heavy evaluate_alerts_impl body and prevents
+    // re-entry deadlock when the breaker branch re-locks the same Mutex).
+    let disabled: std::collections::HashSet<String> = inner
+        .auto_disabled_rules
+        .lock()
+        .await
+        .iter()
+        .cloned()
+        .collect();
     for rule in &inner.config.alert_rules {
+        let key = format!("{}::{}", target_name, rule.name);
+        if disabled.contains(&key) { continue; }
         let burn = match rule.window {
             Some(w) if w >= crate::slo::BurnWindow::SLOW_BURN.long => burn_long,
             _ => burn_short,
@@ -78,6 +90,41 @@ pub(crate) async fn evaluate_alerts_impl(
                         }
                     }
                     fired.push(payload);
+
+                    // Slice 34: per-rule auto-disable (circuit breaker).
+                    // Append this fire's timestamp to the rolling deque, prune
+                    // anything outside `auto_disable_window`, then if the
+                    // count crosses `auto_disable_after`, auto-disable the rule
+                    // and emit metrics + a structured log line.
+                    if let Some(after) = rule.auto_disable_after {
+                        let window = rule.auto_disable_window.as_secs();
+                        let inner = me.inner.load();
+                        let mut history = inner.rule_fire_history.lock().await;
+                        let entry = history.entry(key.clone()).or_default();
+                        let cutoff = ts.saturating_sub(window);
+                        while entry.front().map_or(false, |t| *t <= cutoff) {
+                            entry.pop_front();
+                        }
+                        entry.push_back(ts);
+                        let count = entry.len() as u32;
+                        if count >= after {
+                            let mut disabled = inner.auto_disabled_rules.lock().await;
+                            if disabled.insert(key.clone()) {
+                                let m = inner.metrics.lock().await;
+                                m.record_rule_auto_disabled(&rule.name, target_name);
+                                m.set_rule_active(&rule.name, target_name, false);
+                                drop(m);
+                                tracing::warn!(
+                                    target = %target_name,
+                                    rule = %rule.name,
+                                    fires = count,
+                                    window_secs = window,
+                                    threshold = after,
+                                    "alert rule auto-disabled by circuit breaker"
+                                );
+                            }
+                        }
+                    }
                 }
                 Decision::None => {}
             }

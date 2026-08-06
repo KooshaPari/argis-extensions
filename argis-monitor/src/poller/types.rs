@@ -58,4 +58,13 @@ pub struct MonitorInner {
     /// Optional SQLite state store. When present, every alert state transition
     /// is persisted so the monitor can rehydrate after a restart.
     pub state_store: Mutex<Option<StateStore>>,
+    /// Slice 34 circuit breaker: recent fire timestamps per "{target}::{rule.name}".
+    /// Used to compute the rolling "N fires in M seconds" check that decides
+    /// whether to auto-disable a noisy rule. Bounded to the largest
+    /// `auto_disable_after` in the active config (so the memory footprint
+    /// stays predictable).
+    pub rule_fire_history: tokio::sync::Mutex<std::collections::HashMap<String, std::collections::VecDeque<u64>>>,
+    /// Slice 34: rules that have been auto-disabled by the circuit breaker.
+    /// The poller skips evaluation for any rule in this set.
+    pub auto_disabled_rules: tokio::sync::Mutex<std::collections::HashSet<String>>,
 }

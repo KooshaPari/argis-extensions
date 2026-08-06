@@ -67,6 +67,12 @@ pub struct MetaAlertByTargetLabels {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
+pub struct RuleLabels {
+    pub rule: String,
+    pub target: String,
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 pub struct InfoLabels {
     pub target: String,
     pub version: String,
@@ -113,6 +119,13 @@ pub struct Metrics {
     /// 0 otherwise. Lets dashboards show "how many meta-alerts are currently
     /// tripping" without scraping `_fired_total` deltas.
     pub meta_alerts_active: Family<MetaAlertLabels, Gauge>,
+    /// Total times an alert rule was auto-disabled by the circuit breaker
+    /// (slice 34). Partitioned by (rule, target) so dashboards can show
+    /// which rules tripped the breaker most often.
+    pub rule_auto_disabled_total: Family<RuleLabels, Counter>,
+    /// Current active state per alert rule. 1 = active, 0 = auto-disabled.
+    /// Lets dashboards show which rules are currently suppressed.
+    pub rule_active: Family<RuleLabels, Gauge>,
 }
 
 impl Metrics {
@@ -134,6 +147,8 @@ impl Metrics {
         let meta_alerts_fired_total = Family::<MetaAlertLabels, Counter>::default();
         let meta_alerts_fired_by_target_total = Family::<MetaAlertByTargetLabels, Counter>::default();
         let meta_alerts_active = Family::<MetaAlertLabels, Gauge>::default();
+        let rule_auto_disabled_total = Family::<RuleLabels, Counter>::default();
+        let rule_active = Family::<RuleLabels, Gauge>::default();
 
         registry.register("argis_monitor_polls_total", "Total polls attempted.", polls_total.clone());
         registry.register("argis_monitor_poll_errors_total", "Total polls that failed.", poll_errors_total.clone());
@@ -166,12 +181,22 @@ impl Metrics {
             "Current firing state per (meta, target, severity). 1 if the rule's failure count is currently above its consecutive_failures threshold, 0 otherwise.",
             meta_alerts_active.clone(),
         );
+        registry.register(
+            "argis_monitor_rule_auto_disabled_total",
+            "Total times an alert rule was auto-disabled by the circuit breaker (slice 34).",
+            rule_auto_disabled_total.clone(),
+        );
+        registry.register(
+            "argis_monitor_rule_active",
+            "Current active state per (rule, target). 1 = active, 0 = auto-disabled.",
+            rule_active.clone(),
+        );
 
         target_info
             .get_or_create(&InfoLabels { target: target.into(), version: env!("CARGO_PKG_VERSION").into() })
             .inc();
 
-        Self { polls_total, poll_errors_total, poll_duration, last_poll_ts, up, burn_rate, slo_target, target_info, meta_alerts_fired_total, meta_alerts_fired_by_target_total, meta_alerts_active }
+        Self { polls_total, poll_errors_total, poll_duration, last_poll_ts, up, burn_rate, slo_target, target_info, meta_alerts_fired_total, meta_alerts_fired_by_target_total, meta_alerts_active, rule_auto_disabled_total, rule_active }
     }
 
     pub fn record_sample(&self, s: &Sample) {
@@ -237,6 +262,23 @@ impl Metrics {
                 severity: severity.into(),
             })
             .inc();
+    }
+
+    /// Increment the auto-disable counter for a rule. Called by the
+    /// circuit breaker (slice 34) once per auto-disable event.
+    pub fn record_rule_auto_disabled(&self, rule: &str, target: &str) {
+        self.rule_auto_disabled_total
+            .get_or_create(&RuleLabels { rule: rule.into(), target: target.into() })
+            .inc();
+    }
+
+    /// Set the active state (1) or auto-disabled state (0) for a rule.
+    /// Called by the circuit breaker when a rule transitions.
+    pub fn set_rule_active(&self, rule: &str, target: &str, active: bool) {
+        let v: i64 = if active { 1 } else { 0 };
+        self.rule_active
+            .get_or_create(&RuleLabels { rule: rule.into(), target: target.into() })
+            .set(v);
     }
 
     /// Set the active (1) or idle (0) state for a meta-alert on a target.

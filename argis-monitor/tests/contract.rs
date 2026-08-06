@@ -207,6 +207,8 @@ fn alert_state_transitions_in_unit_test() {
         cooldown: std::time::Duration::from_secs(60),
         webhooks: vec![],
         window: None,
+        auto_disable_after: None,
+        auto_disable_window: std::time::Duration::from_secs(600),
     };
     let mut t = AlertStateTracker::default();
 
@@ -826,6 +828,8 @@ async fn meta_alert_falls_back_to_alert_rule_webhooks_when_meta_webhooks_empty()
         window: None,
         for_secs: std::time::Duration::from_secs(0),
         cooldown: std::time::Duration::from_secs(0),
+        auto_disable_after: None,
+        auto_disable_window: std::time::Duration::from_secs(600),
         webhooks: vec![WebhookTarget {
             url: format!("{}/fallback", server.uri()),
             ..Default::default()
@@ -1416,5 +1420,163 @@ fn trace_layer_is_wired_in_exporter() {
     // reachable from the exporter crate. We assert on the type path
     // (a compile-time check, not runtime).
     let _: fn() -> std::option::Option<tower_http::trace::TraceLayer<axum::routing::Route>> = || None;
+}
+
+// =====================================================================
+// Slice 34: per-rule auto-disable (circuit breaker)
+// =====================================================================
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rule_auto_disables_after_consecutive_fires_within_window() {
+    use argis_monitor::alerts::{AlertRule, MetaAlertRule, Severity, WebhookTarget};
+    use argis_monitor::state_store::StateStore;
+    use wiremock::matchers::{method, path};
+
+    // Webhook receiver that 500s so every alert delivery fails.
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/alerts"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(4) // 3 fires + the test's own request
+        .mount(&server)
+        .await;
+
+    let data_dir = std::env::temp_dir().join(format!(
+        "argis-slice34-1-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&data_dir).unwrap();
+    let db_path = data_dir.join("alert_state.sqlite");
+    {
+        let mut store = StateStore::open(&db_path).expect("open store");
+        // 3 failures so the per-rule alert fires once.
+        let now: u64 = 1_700_040_000;
+        for offset in [5_u64, 15, 25] {
+            store.record_alert_failure("gateway::*", now - offset, "500").expect("rec");
+        }
+    }
+    let alert_rule = AlertRule {
+        name: "noisy_alert".into(),
+        slo: "chat_completions_p99".into(),
+        threshold: 0.1,
+        resolve_threshold: None,
+        window: None,
+        for_secs: std::time::Duration::from_secs(0),
+        cooldown: std::time::Duration::from_secs(0),
+        webhooks: vec![WebhookTarget { url: format!("{}/alerts", server.uri()), ..Default::default() }],
+        auto_disable_after: Some(3),
+        auto_disable_window: std::time::Duration::from_secs(600),
+    };
+    let mut cfg = Config::for_test("http://127.0.0.1:1");
+    cfg.data_dir = Some(data_dir.clone());
+    cfg.targets.clear();
+    cfg.targets.push(argis_monitor::Target::new("gateway", "http://127.0.0.1:1"));
+    cfg.alert_rules.push(alert_rule);
+    let monitor = argis_monitor::Monitor::new(cfg).expect("monitor");
+
+    // First evaluate: rule fires (3 failures in window). Fire #1 recorded.
+    let fired1 = monitor.evaluate_alerts("gateway", 5.0, 5.0, 1_700_040_000).await;
+    assert_eq!(fired1.len(), 1, "fire #1 expected, got: {fired1:?}");
+
+    // Seed 3 MORE failures so the next evaluate fires again. (Same circuit.)
+    {
+        let mut store = StateStore::open(&db_path).expect("open store");
+        let now: u64 = 1_700_040_000;
+        for offset in [5_u64, 15, 25] {
+            store.record_alert_failure("gateway::*", now - offset, "500").expect("rec");
+        }
+    }
+    let fired2 = monitor.evaluate_alerts("gateway", 5.0, 5.0, 1_700_040_000).await;
+    assert_eq!(fired2.len(), 1, "fire #2 expected, got: {fired2:?}");
+
+    // Seed 3 more for fire #3.
+    {
+        let mut store = StateStore::open(&db_path).expect("open store");
+        let now: u64 = 1_700_040_000;
+        for offset in [5_u64, 15, 25] {
+            store.record_alert_failure("gateway::*", now - offset, "500").expect("rec");
+        }
+    }
+    let fired3 = monitor.evaluate_alerts("gateway", 5.0, 5.0, 1_700_040_000).await;
+    assert_eq!(fired3.len(), 1, "fire #3 expected (auto-disable fires on this tick), got: {fired3:?}");
+
+    // After 3 fires, the rule should now be auto-disabled.
+    let mut buf = String::new();
+    prometheus_client::encoding::text::encode(&mut buf, &monitor.registry()).unwrap();
+    assert!(
+        buf.contains("argis_monitor_rule_auto_disabled_total"),
+        "expected rule_auto_disabled_total counter:
+{buf}"
+    );
+    let line = buf.lines().find(|l| l.starts_with("argis_monitor_rule_auto_disabled_total_total{") && l.contains("rule=\"noisy_alert\""));
+    assert!(line.is_some(), "expected rule_auto_disabled_total line for noisy_alert:
+{buf}");
+    assert!(line.unwrap().ends_with(" 1"), "expected counter=1 after 3 fires: {line:?}");
+
+    // gauge for the same rule should now show 0 (auto-disabled).
+    let line = buf.lines().find(|l| l.starts_with("argis_monitor_rule_active{") && l.contains("rule=\"noisy_alert\""));
+    assert!(line.is_some(), "expected rule_active line for noisy_alert:
+{buf}");
+    assert!(line.unwrap().ends_with(" 0"), "expected rule_active=0 after auto-disable: {line:?}");
+
+    let _ = std::fs::remove_dir_all(&data_dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rule_does_not_auto_disable_below_threshold() {
+    use argis_monitor::alerts::{AlertRule, MetaAlertRule, Severity, WebhookTarget};
+    use argis_monitor::state_store::StateStore;
+
+    let data_dir = std::env::temp_dir().join(format!(
+        "argis-slice34-2-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&data_dir).unwrap();
+    let db_path = data_dir.join("alert_state.sqlite");
+    {
+        let mut store = StateStore::open(&db_path).expect("open store");
+        let now: u64 = 1_700_041_000;
+        // Only 2 failures (threshold is 3).
+        for offset in [5_u64, 15] {
+            store.record_alert_failure("gateway::*", now - offset, "500").expect("rec");
+        }
+    }
+    let alert_rule = AlertRule {
+        name: "quiet_alert".into(),
+        slo: "chat_completions_p99".into(),
+        threshold: 0.1,
+        resolve_threshold: None,
+        window: None,
+        for_secs: std::time::Duration::from_secs(0),
+        cooldown: std::time::Duration::from_secs(0),
+        webhooks: vec![WebhookTarget { url: "http://127.0.0.1:1".into(), ..Default::default() }],
+        auto_disable_after: Some(3),
+        auto_disable_window: std::time::Duration::from_secs(600),
+    };
+    let mut cfg = Config::for_test("http://127.0.0.1:1");
+    cfg.data_dir = Some(data_dir.clone());
+    cfg.targets.clear();
+    cfg.targets.push(argis_monitor::Target::new("gateway", "http://127.0.0.1:1"));
+    cfg.alert_rules.push(alert_rule);
+    let monitor = argis_monitor::Monitor::new(cfg).expect("monitor");
+
+    // Below threshold -> no fire -> no auto-disable.
+    let fired = monitor.evaluate_alerts("gateway", 5.0, 5.0, 1_700_041_000).await;
+    assert!(fired.is_empty(), "no fires expected below threshold, got: {fired:?}");
+
+    let mut buf = String::new();
+    prometheus_client::encoding::text::encode(&mut buf, &monitor.registry()).unwrap();
+    let line = buf.lines().find(|l| l.starts_with("argis_monitor_rule_auto_disabled_total_total{") && l.contains("rule=\"quiet_alert\""));
+    assert!(line.is_none(), "no auto-disable expected for quiet_alert, got: {line:?}");
+
+    let _ = std::fs::remove_dir_all(&data_dir);
 }
 
