@@ -14,9 +14,9 @@
 //! The check is purely deterministic — no I/O, no clock drift, just
 //! arithmetic on the current unix timestamp + window bounds.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
-use chrono::{Datelike, NaiveDateTime, Timelike, Weekday};
+use chrono::{Datelike, Duration as ChronoDuration, NaiveDateTime, Timelike, Weekday};
 use serde::{Deserialize, Serialize};
 
 /// Days of the week for recurring windows.
@@ -112,16 +112,13 @@ fn one_shot_active(w: &WindowSpec, now_unix: u64) -> bool {
                 .map(|dt| dt.timestamp())
         })
     };
-    let start = match parse(&w.start_at) {
-        Some(t) => t,
-        None => return false,
-    };
-    let end = match parse(&w.end_at) {
-        Some(t) => t,
-        None => return false,
-    };
     let now = now_unix as i64;
-    now >= start && now <= end
+    match (parse(&w.start_at), parse(&w.end_at)) {
+        (Some(start), Some(end)) => now >= start && now <= end,
+        (Some(start), None) => now >= start,
+        (None, Some(end)) => now <= end,
+        (None, None) => false,
+    }
 }
 
 fn recurring_active(w: &WindowSpec, now_unix: u64) -> bool {
@@ -139,15 +136,21 @@ fn recurring_active(w: &WindowSpec, now_unix: u64) -> bool {
         Some(d) => d,
         None => return false,
     };
-    // Day filter (empty = every day).
-    if !w.days.is_empty() {
-        let today = Day::from_chrono(dt.weekday());
-        if !w.days.contains(&today) { return false; }
-    }
     let (hh, mm) = (dt.hour(), dt.minute());
     let now_secs = hh * 3600 + mm * 60;
     let start_secs = start_hhmm.0 * 3600 + start_hhmm.1 * 60;
     let end_secs = end_hhmm.0 * 3600 + end_hhmm.1 * 60;
+    // The post-midnight portion of a wrapping window belongs to the day on
+    // which that window started (Tuesday 02:00 is Monday's 22:00-06:00).
+    let window_day = if start_secs > end_secs && now_secs <= end_secs {
+        dt - ChronoDuration::days(1)
+    } else {
+        dt
+    };
+    if !w.days.is_empty() {
+        let day = Day::from_chrono(window_day.weekday());
+        if !w.days.contains(&day) { return false; }
+    }
     if start_secs <= end_secs {
         now_secs >= start_secs && now_secs <= end_secs
     } else {
@@ -252,6 +255,18 @@ mod tests {
     }
 
     #[test]
+    fn wrapping_window_uses_its_start_day_for_the_post_midnight_segment() {
+        let w = WindowSpec {
+            name: "monday-night".into(),
+            start_time: Some("22:00".into()), end_time: Some("06:00".into()),
+            days: vec![Day::Mon], start_at: None, end_at: None,
+            targets: vec![], rules: vec![], reason: None,
+        };
+        assert!(is_suppressed(&[w.clone()], "any", "any", unix_from_utc(2026, 7, 7, 2, 0, 0)).is_some());
+        assert!(is_suppressed(&[w], "any", "any", unix_from_utc(2026, 7, 8, 2, 0, 0)).is_none());
+    }
+
+    #[test]
     fn one_shot_window_matches_exact_range() {
         let w = WindowSpec {
             name: "maintenance".into(),
@@ -264,6 +279,20 @@ mod tests {
         assert!(is_suppressed(&[w.clone()], "any", "any", unix_from_utc(2026, 7, 15, 3, 0, 0)).is_some());
         assert!(is_suppressed(&[w.clone()], "any", "any", unix_from_utc(2026, 7, 15, 1, 0, 0)).is_none());
         assert!(is_suppressed(&[w.clone()], "any", "any", unix_from_utc(2026, 7, 15, 5, 0, 0)).is_none());
+    }
+
+    #[test]
+    fn one_shot_window_accepts_either_open_bound() {
+        let start_only = WindowSpec {
+            name: "from-start".into(), start_at: Some("2026-07-15T02:00:00Z".into()), end_at: None,
+            start_time: None, end_time: None, days: vec![], targets: vec![], rules: vec![], reason: None,
+        };
+        assert!(is_suppressed(&[start_only], "any", "any", unix_from_utc(2026, 7, 16, 0, 0, 0)).is_some());
+        let end_only = WindowSpec {
+            name: "until-end".into(), start_at: None, end_at: Some("2026-07-15T04:00:00Z".into()),
+            start_time: None, end_time: None, days: vec![], targets: vec![], rules: vec![], reason: None,
+        };
+        assert!(is_suppressed(&[end_only], "any", "any", unix_from_utc(2026, 7, 15, 3, 0, 0)).is_some());
     }
 
     #[test]

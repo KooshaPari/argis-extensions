@@ -13,13 +13,12 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 
-use crate::alerts::{self, AlertRule, AlertStateTracker, Decision};
+use crate::alerts::{self, AlertStateTracker, Decision};
 use crate::config::{Config, SLO};
 use crate::metrics::{Metrics, Outcome, Sample};
 use crate::ring_buffer::RingBuffer;
 use crate::slo::{burn_rate, BurnWindow};
 use crate::target::Target;
-use crate::push;
 use crate::state_store::{StateStore, TrackerSnapshot};
 use crate::suppression;
 use crate::webhook;
@@ -50,6 +49,51 @@ pub enum PollError {
 struct TargetCounters {
     short: RingBuffer,
     long: RingBuffer,
+}
+
+type FiredMeta = (String, crate::alerts::Severity, f64, f64, u64);
+
+fn compute_slo_burns(
+    counters: &TargetCounters,
+    slos: &[SLO],
+    ts: u64,
+) -> (HashMap<String, (f64, f64)>, f64, f64) {
+    let mut burns = HashMap::new();
+    let mut last_short = 0.0;
+    let mut last_long = 0.0;
+    for slo in slos {
+        let (short_success, short_failure) =
+            counters.short.window(BurnWindow::FAST_BURN.short.as_secs(), ts);
+        let (long_success, long_failure) = counters.long.window(slo.window_secs, ts);
+        let short = burn_rate(short_success, short_failure, slo.target);
+        let long = burn_rate(long_success, long_failure, slo.target);
+        burns.insert(slo.name.clone(), (short, long));
+        last_short = short;
+        last_long = long;
+    }
+    (burns, last_short, last_long)
+}
+
+fn fired_metadata(decision: &Decision) -> Option<FiredMeta> {
+    match decision {
+        Decision::Fire(payload) => Some((
+            payload.rule.clone(),
+            payload.severity,
+            payload.burn_rate,
+            payload.threshold,
+            payload.fired_at_unix,
+        )),
+        Decision::None => None,
+    }
+}
+
+async fn abort_and_join(handles: Vec<tokio::task::JoinHandle<()>>) {
+    for handle in &handles {
+        handle.abort();
+    }
+    for handle in handles {
+        let _ = handle.await;
+    }
 }
 
 /// The monitor: shared registry + metrics + per-target ring buffers + HTTP client.
@@ -193,7 +237,7 @@ impl Monitor {
             _ = sigterm.recv() => { info!("SIGTERM, exiting"); }
             _ = sigint.recv()  => { info!("SIGINT, exiting");  }
         }
-        for h in handles { let _ = h.await; }
+        abort_and_join(handles).await;
         Ok(())
     }
 
@@ -250,7 +294,7 @@ impl Monitor {
             }
         };
 
-        let mut m = self.inner.metrics.lock().await;
+        let m = self.inner.metrics.lock().await;
         m.record_sample(&sample);
 
         // Update per-target ring buffers + compute burn against each SLO.
@@ -262,52 +306,40 @@ impl Monitor {
         tc.short.record(is_success, ts);
         tc.long.record(is_success, ts);
 
-        let short_window = BurnWindow::FAST_BURN.long.as_secs();
-        let long_window = tc.long.bucket_size_secs().max(1) * tc.long.len() as u64;
-        let (s_short, f_short) = tc.short.window(short_window, ts);
-        let (s_long, f_long) = tc.long.window(long_window, ts);
-
-        let mut burn_short = 0.0_f64;
-        let mut burn_long = 0.0_f64;
+        let (slo_burns, burn_short, burn_long) =
+            compute_slo_burns(tc, &self.inner.config.slos, ts);
         for slo in &self.inner.config.slos {
-            let bs = burn_rate(s_short, f_short, slo.target);
-            let bl = burn_rate(s_long, f_long, slo.target);
+            let (bs, bl) = slo_burns[&slo.name];
             m.record_burn(&format!("{}::{}", target.name, slo.name), BurnWindow::FAST_BURN, bs);
             m.record_burn(&format!("{}::{}", target.name, slo.name), BurnWindow::SLOW_BURN, bl);
-            burn_short = bs;
-            burn_long = bl;
         }
+        drop(c);
         drop(m);
 
         // Evaluate alert rules (separately so the metrics lock is released).
-        let payloads = self.evaluate_alerts(&target.name, burn_short, burn_long, ts).await;
+        let payloads = self.evaluate_alerts(&target.name, &slo_burns, ts).await;
         Ok(PollOutcome { sample, burn_short, burn_long, alert_payloads: payloads })
     }
 
     /// Evaluate every alert rule against the latest burn rates. Returns the
     /// list of payloads that fired (already delivered via webhooks).
-    #[tracing::instrument(
-        skip(self),
-        fields(
-            target = %target_name,
-            burn_short = burn_short,
-            burn_long = burn_long,
-        ),
-    )]
-    async fn evaluate_alerts(&self, target_name: &str, burn_short: f64, burn_long: f64, ts: u64) -> Vec<alerts::AlertPayload> {
+    async fn evaluate_alerts(&self, target_name: &str, slo_burns: &HashMap<String, (f64, f64)>, ts: u64) -> Vec<alerts::AlertPayload> {
         let mut fired = Vec::new();
-        let mut store = self.inner.state_store.lock().await;
         for rule in &self.inner.config.alert_rules {
+            let (burn_short, burn_long) = slo_burns.get(&rule.slo).copied().unwrap_or((0.0, 0.0));
             let burn = match rule.window {
                 Some(w) if w >= crate::slo::BurnWindow::SLOW_BURN.long => burn_long,
                 _ => burn_short,
             };
             let key = format!("{}::{}", target_name, rule.name);
             let snap;
+            let fired_meta;
             {
                 let mut trackers = self.inner.alert_trackers.lock().await;
                 let tracker = trackers.entry(key.clone()).or_insert_with(AlertStateTracker::default);
-                match alerts::evaluate(rule, target_name, burn, ts, tracker) {
+                let decision = alerts::evaluate(rule, target_name, burn, ts, tracker);
+                fired_meta = fired_metadata(&decision);
+                match decision {
                     Decision::Fire(payload) => {
                         // Suppression check. A matching window swallows the
                         // webhook delivery but the state machine still
@@ -343,9 +375,8 @@ impl Monitor {
                     sustained_secs: tracker.sustained_for.as_secs(),
                 };
             }
-            // Capture fired-meta for the alert_history insert below.
-            let fired_meta = fired.last().map(|p| (p.rule.clone(), p.severity, p.burn_rate, p.threshold, p.fired_at_unix));
             // Persist outside the trackers lock to avoid contention.
+            let mut store = self.inner.state_store.lock().await;
             if let Some(s) = store.as_mut() {
                 if let Err(e) = s.save(&key, &snap) {
                     tracing::warn!(target = %target_name, rule = %rule.name, error = %e, "state store save failed");
@@ -387,6 +418,43 @@ impl Monitor {
 
     pub fn windows(&self) -> &'static [BurnWindow] {
         &[BurnWindow::FAST_BURN, BurnWindow::SLOW_BURN]
+    }
+}
+
+#[cfg(test)]
+mod recovery_tests {
+    use super::*;
+
+    #[test]
+    fn slo_burns_use_each_slos_own_long_window() {
+        let mut counters = TargetCounters {
+            short: RingBuffer::with_bucket_size(600, 60, 0),
+            long: RingBuffer::with_bucket_size(7200, 60, 0),
+        };
+        counters.short.record(false, 0);
+        counters.long.record(false, 0);
+        counters.short.record(true, 3600);
+        counters.long.record(true, 3600);
+        let slos = vec![
+            SLO { name: "five-min".into(), window_secs: 300, target: 0.5 },
+            SLO { name: "two-hour".into(), window_secs: 7200, target: 0.5 },
+        ];
+        let (burns, _, _) = compute_slo_burns(&counters, &slos, 3600);
+        assert_eq!(burns["five-min"].1, 0.0);
+        assert_eq!(burns["two-hour"].1, 1.0);
+    }
+
+    #[test]
+    fn non_firing_rule_has_no_history_metadata_to_reuse() {
+        assert!(fired_metadata(&Decision::None).is_none());
+    }
+
+    #[tokio::test]
+    async fn shutdown_aborts_infinite_target_tasks_before_joining() {
+        let handle = tokio::spawn(std::future::pending::<()>());
+        tokio::time::timeout(Duration::from_secs(1), abort_and_join(vec![handle]))
+            .await
+            .expect("aborted tasks must not block shutdown");
     }
 }
 
