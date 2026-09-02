@@ -200,19 +200,25 @@ pub fn evaluate(
     tracker: &mut AlertStateTracker,
 ) -> Decision {
     let resolve = rule.resolve_threshold.unwrap_or(rule.threshold / 2.0);
-    let now_in_state = tracker.sustained_for;
     match tracker.state {
         AlertState::Ok => {
             if burn >= rule.threshold {
-                tracker.state = AlertState::Pending { since: ts };
-                tracker.sustained_for = Duration::from_secs(0);
-                Decision::None
+                if rule.for_secs.is_zero() {
+                    tracker.state = AlertState::Firing { since: ts, last_fired_at: ts };
+                    Decision::Fire(AlertPayload::firing(
+                        &rule.name, target, &rule.slo, burn, rule.threshold, ts,
+                    ))
+                } else {
+                    tracker.state = AlertState::Pending { since: ts };
+                    tracker.sustained_for = Duration::from_secs(0);
+                    Decision::None
+                }
             } else {
                 Decision::None
             }
         }
         AlertState::Pending { since } => {
-            if burn < resolve {
+            if burn < rule.threshold {
                 tracker.state = AlertState::Ok;
                 tracker.sustained_for = Duration::from_secs(0);
                 Decision::None
@@ -321,6 +327,23 @@ mod tests {
         let d = evaluate(&rule, "gateway", 3.0, 100, &mut t);
         assert_eq!(d, Decision::None);
         assert!(matches!(t.state, AlertState::Pending { .. }));
+    }
+
+    #[test]
+    fn zero_sustain_duration_fires_on_the_crossing_tick() {
+        let rule = AlertRule { name: "r".into(), slo: "s".into(), threshold: 2.0, for_secs: Duration::ZERO, ..Default::default() };
+        let mut t = AlertStateTracker::default();
+        assert!(matches!(evaluate(&rule, "gateway", 3.0, 100, &mut t), Decision::Fire(_)));
+        assert!(matches!(t.state, AlertState::Firing { last_fired_at: 100, .. }));
+    }
+
+    #[test]
+    fn pending_resets_on_threshold_recovery_not_resolve_hysteresis() {
+        let rule = AlertRule { name: "r".into(), slo: "s".into(), threshold: 2.0, resolve_threshold: Some(1.0), for_secs: Duration::from_secs(5), ..Default::default() };
+        let mut t = AlertStateTracker { state: AlertState::Pending { since: 100 }, sustained_for: Duration::from_secs(2) };
+        assert_eq!(evaluate(&rule, "gateway", 1.5, 103, &mut t), Decision::None);
+        assert_eq!(t.state, AlertState::Ok);
+        assert_eq!(t.sustained_for, Duration::ZERO);
     }
 
     #[test]
