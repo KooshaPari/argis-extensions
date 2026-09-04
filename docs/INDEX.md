@@ -7,6 +7,7 @@ This index lists the design notes, ADRs, and supporting documentation maintained
 - [`AI_ML_ARCHITECTURE.md`](AI_ML_ARCHITECTURE.md) — Ai Ml Architecture
 - [`COMPLETION.md`](COMPLETION.md) — Completion
 - [`INDEX.md`](INDEX.md) — Index
+- [`LINEAGE.md`](LINEAGE.md) — Lineage correction (false-fork record)
 - [`README.md`](README.md) — Readme
 - [`ROADMAP.md`](ROADMAP.md) — Roadmap
 - [`SSOT.md`](SSOT.md) — Ssot
